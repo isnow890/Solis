@@ -92,31 +92,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
-          generate_release_notes: true
+          generate_release_notes: ${{ github.event_name == 'push' }}
           fail_on_unmatched_files: true
           files: |
             release-source/build/halo-v${{ env.VERSION }}-arm64.dmg
             release-source/build/halo-v${{ env.VERSION }}-arm64.zip
             release-source/build/SHA256SUMS.txt
-
-      - name: Update first-launch instructions for v0.1.0
-        if: env.VERSION == '0.1.0'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          notes="$RUNNER_TEMP/halo-release.md"
-          gh release view v0.1.0 --json body --jq .body > "$notes"
-          if rg -q '^## First Launch \(Ad-Hoc Signed Build\)' "$notes"; then
-            python3 - "$notes" <<'PY'
-          import pathlib, re, sys
-          path = pathlib.Path(sys.argv[1])
-          notes = re.sub(r'^## First Launch \(Ad-Hoc Signed Build\).*?^\x60\x60\x60[ \t]*$',
-                         '## First Launch\n\nDrag the notarized halo.app to /Applications and open it.',
-                         path.read_text(), count=1, flags=re.M | re.S)
-          path.write_text(notes)
-          PY
-            gh release edit v0.1.0 --notes-file "$notes"
-          fi
 
       - name: Clean up signing keychain
         if: always()

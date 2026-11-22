@@ -23,12 +23,14 @@ jobs:
 
       - name: Resolve version
         id: meta
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             TAG="${GITHUB_REF_NAME}"
             VER="${TAG#v}"
           else
-            VER="${{ inputs.version }}"
+            VER="${INPUT_VERSION}"
             TAG="v${VER}"
           fi
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
@@ -37,10 +39,11 @@ jobs:
       - name: Build & Package Solis.app
         env:
           CODESIGN_IDENTITY: "-"
+          VERSION: ${{ steps.meta.outputs.version }}
         run: |
           chmod +x scripts/build-app.sh scripts/package-dmg.sh
           ./scripts/build-app.sh
-          VERSION="${{ steps.meta.outputs.version }}" ./scripts/package-dmg.sh
+          ./scripts/package-dmg.sh
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

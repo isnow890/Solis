@@ -5,12 +5,16 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="Solis"
 BUILD_DIR="$ROOT_DIR/build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
-VERSION="${VERSION:-0.1.0}"
+bundle_version=""
+if [[ -f "$APP_BUNDLE/Contents/Info.plist" ]]; then
+  bundle_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_BUNDLE/Contents/Info.plist")
+fi
+VERSION="${VERSION:-${bundle_version:-0.1.0}}"
 ARCH="$(uname -m)"
 
-if [[ ! -d "$APP_BUNDLE" ]]; then
-  echo "==> $APP_BUNDLE not found; running build-app.sh first..."
-  "$ROOT_DIR/scripts/build-app.sh"
+if [[ "$VERSION" != "$bundle_version" ]]; then
+  echo "==> Building the app bundle for version $VERSION..."
+  VERSION="$VERSION" "$ROOT_DIR/scripts/build-app.sh"
 fi
 
 DMG_NAME="${APP_NAME}-v${VERSION}-${ARCH}.dmg"

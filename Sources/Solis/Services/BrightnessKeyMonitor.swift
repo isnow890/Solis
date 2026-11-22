@@ -1,7 +1,7 @@
 import AppKit
 import ApplicationServices
 
-final class BrightnessKeyMonitor {
+final class BrightnessKeyMonitor: NSObject {
     enum StepDirection { case up, down }
     struct Status: Equatable {
         var accessibility = AXIsProcessTrusted()
@@ -9,7 +9,6 @@ final class BrightnessKeyMonitor {
         var enabled = false
         var mask: CGEventMask = 0
         var ready: Bool { enabled && mask & requiredMask == requiredMask }
-        /// True when macOS reports Accessibility granted yet the event tap still failed (rare stale-process case).
         var needsRelaunch: Bool { accessibility && !ready }
     }
 
@@ -37,7 +36,10 @@ final class BrightnessKeyMonitor {
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
     private var poll: Timer?
-    private var fastPollDeadline: Date?
+    private var fastPollDeadline: ContinuousClock.Instant?
+    private var stopped = false
+    private var observingPermission = false
+    private static let permissionNotification = Notification.Name("com.apple.accessibility.api")
     private var retryInterval = 1.5
     private var consumed = [Int64: StepDirection]()
 
@@ -54,13 +56,15 @@ final class BrightnessKeyMonitor {
         }
     }
 
-    /// Requests Accessibility permission (single clean system prompt) and opens the relevant Settings pane.
     static func requestAccessibilityPermission() {
-        let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
-        let alreadyTrusted = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
-        if !alreadyTrusted {
-            openAccessibilitySettings()
+        if !AXIsProcessTrusted() {
+            let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+            _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
         }
+        if !CGPreflightPostEventAccess() {
+            _ = CGRequestPostEventAccess()
+        }
+        openAccessibilitySettings()
     }
 
     static func openAccessibilitySettings() {
@@ -69,29 +73,45 @@ final class BrightnessKeyMonitor {
         }
     }
 
+    func start() {
+        guard !stopped, !observingPermission else { return }
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(permissionChanged(_:)),
+            name: Self.permissionNotification, object: nil, suspensionBehavior: .deliverImmediately)
+        observingPermission = true
+        refresh()
+    }
+
+    @objc private func permissionChanged(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in self?.beginFastPolling() }
+    }
+
     /// Polls every 1 second for 60 seconds right after the user clicks "권한 허용" so returning from Settings feels instant.
     func beginFastPolling(duration: TimeInterval = 60) {
-        fastPollDeadline = Date().addingTimeInterval(duration)
+        guard !stopped else { return }
+        fastPollDeadline = .now.advanced(by: .seconds(duration))
         retryInterval = 1.0
         refresh()
     }
 
     func refresh() {
+        guard !stopped else { return }
         poll?.invalidate()
         var status = currentStatus()
-        if !status.ready {
+        if !status.ready || !status.accessibility {
             removeTap()
-            installTap()
+            // Creating an active tap may prompt on first launch. Only probe an authorized process.
+            if status.accessibility && status.postEvent { installTap() }
             status = currentStatus()
         }
         onStatus?(status)
 
+        guard !stopped else { return }
         let interval: TimeInterval
         if status.ready {
             fastPollDeadline = nil
             retryInterval = 1.5
             interval = 15
-        } else if let deadline = fastPollDeadline, Date() < deadline {
+        } else if let deadline = fastPollDeadline, .now < deadline {
             interval = 1.0
         } else {
             fastPollDeadline = nil
@@ -136,6 +156,11 @@ final class BrightnessKeyMonitor {
     }
 
     func stop() {
+        stopped = true
+        if observingPermission {
+            DistributedNotificationCenter.default().removeObserver(self, name: Self.permissionNotification, object: nil)
+            observingPermission = false
+        }
         poll?.invalidate()
         poll = nil
         fastPollDeadline = nil

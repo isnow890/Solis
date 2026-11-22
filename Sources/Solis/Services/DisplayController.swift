@@ -22,6 +22,10 @@ final class DisplayController: ObservableObject {
     @Published var showSettingsInPopover: Bool = false
 
     var isAccessibilityGranted: Bool { keyStatus.ready }
+    @Published var permissionBannerDeferred = false
+    private var waitingForFirstConnection = false
+    private var announcedKeyConnection = false
+
     var needsPermissionRelaunch: Bool { keyStatus.needsRelaunch }
 
     @Published var captureStandardKeys = BrightnessKeyMonitor.standardKeysDefault {
@@ -73,6 +77,7 @@ final class DisplayController: ObservableObject {
 
     /// Display IDs currently targeted by keyboard brightness keys (P0-3).
     func isKeyTarget(_ displayID: CGDirectDisplayID) -> Bool {
+        guard keyStatus.ready else { return false }
         switch keyTargetMode {
         case .mouseCursor:
             return cursorDisplayID == displayID
@@ -100,9 +105,10 @@ final class DisplayController: ObservableObject {
     private var reconfigDebounceItem: DispatchWorkItem?
     private var bannerDismissItem: DispatchWorkItem?
     private var identifyWorkItem: DispatchWorkItem?
+    private var identifyOwner: (id: CGDirectDisplayID, uuid: String)?
     private var revertTimer: Timer?
     private var reconfigRegistered = false
-    private var lastNativeWriteTime: [CGDirectDisplayID: Date] = [:]
+    private var lastNativeWriteTime: [CGDirectDisplayID: ContinuousClock.Instant] = [:]
 
     // Continuous 120Hz exponential-damping brightness animator for silky smooth Native & Overlay ramps
     private var smoothTimer: CADisplayLink?
@@ -143,11 +149,23 @@ final class DisplayController: ObservableObject {
     private func setupKeyMonitor() {
         keyMonitor.captureStandardKeys = captureStandardKeys
         keyMonitor.captureCtrlOptionArrows = captureCtrlOptionArrows
-        keyMonitor.onStatus = { [weak self] in self?.keyStatus = $0 }
+        keyMonitor.onStatus = { [weak self] status in
+            guard let self else { return }
+            if !status.ready { self.waitingForFirstConnection = true }
+            if status.accessibility && self.permissionBannerDeferred { self.permissionBannerDeferred = false }
+            self.keyStatus = status
+            self.announceConnectionIfVisible()
+        }
         keyMonitor.onBrightnessStep = { [weak self] direction, fine, desktop in
             self?.handleBrightnessHotkey(direction: direction, isFineStep: fine, desktop: desktop)
         }
-        keyMonitor.refresh()
+        keyMonitor.start()
+    }
+
+    private func announceConnectionIfVisible() {
+        guard cursorPollTimer != nil, waitingForFirstConnection, keyStatus.ready, !announcedKeyConnection else { return }
+        announcedKeyConnection = true
+        showBanner(.success, "키보드 밝기 키가 연결되었습니다 — 이제 밝기 키를 눌러 보세요.")
     }
 
     func requestAccessibilityPermission() {
@@ -202,6 +220,7 @@ final class DisplayController: ObservableObject {
                 self?.updateCursorDisplay()
             }
         }
+        announceConnectionIfVisible()
     }
 
     func stopCursorTracking() {
@@ -215,16 +234,25 @@ final class DisplayController: ObservableObject {
     }
 
     func scheduleIdentifyDisplay(_ display: DisplayItem) {
-        guard visibleDisplays.count > 1 else { return }
-        identifyWorkItem?.cancel()
+        guard cursorPollTimer != nil, !topologyChanging, visibleDisplays.count > 1 else { return }
+        clearIdentify()
+        let id = display.id
+        let uuid = display.uuidString
+        identifyOwner = (id, uuid)
         let work = DispatchWorkItem { [weak self] in
-            self?.osdController.showIdentify(displayID: display.id, displayName: display.name)
+            guard let self, self.cursorPollTimer != nil, !self.topologyChanging,
+                  self.identifyOwner?.id == id, self.identifyOwner?.uuid == uuid,
+                  DisplayTopology.uuid(id) == uuid, self.visibleDisplays.count > 1,
+                  let current = self.visibleDisplays.first(where: { $0.id == id && $0.uuidString == uuid }) else { return }
+            self.osdController.showIdentify(displayID: id, displayName: current.name)
         }
         identifyWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.28, execute: work)
     }
 
-    func clearIdentify() {
+    func clearIdentify(for display: DisplayItem? = nil) {
+        if let display, identifyOwner?.id != display.id || identifyOwner?.uuid != display.uuidString { return }
+        identifyOwner = nil
         identifyWorkItem?.cancel()
         identifyWorkItem = nil
         osdController.hideIfIdentify()
@@ -235,6 +263,7 @@ final class DisplayController: ObservableObject {
     func refreshDisplays() {
         guard !isShuttingDown, !topologyChanging, let onlineIDs = DisplayTopology.onlineIDs() else { return }
         let previousByID = Dictionary(uniqueKeysWithValues: displays.map { ($0.id, $0) })
+        virtualDisplayManager.reconcileMirrors(online: Set(onlineIDs))
         let virtualIDs = virtualDisplayManager.virtualDisplayIDSet()
         virtualDisplays = virtualDisplayManager.activeVirtualDisplays
 
@@ -264,7 +293,7 @@ final class DisplayController: ObservableObject {
         var builtItems: [DisplayItem] = []
 
         for displayID in onlineIDs {
-            let screen = screenByID[displayID] ?? DisplayTopology.screen(for: displayID)
+            let screen = screenByID[displayID]
             let isBuiltIn = CGDisplayIsBuiltin(displayID) != 0
             let isMain = CGDisplayIsMain(displayID) != 0
             let isVirtual = virtualIDs.contains(displayID)
@@ -295,7 +324,7 @@ final class DisplayController: ObservableObject {
             let scale = screen?.backingScaleFactor ?? (logicalW > 0 ? CGFloat(pixelW) / CGFloat(logicalW) : 1.0)
             let hz = mode?.refreshRate ?? 0
             let rotation = CGDisplayRotation(displayID)
-            let frameMinX = screen?.frame.minX ?? CGDisplayBounds(displayID).minX
+            let frameMinX = DisplayTopology.screen(for: displayID)?.frame.minX ?? CGDisplayBounds(displayID).minX
 
             let previous = previousByID[displayID].flatMap { $0.uuidString == uuidString ? $0 : nil }
             let canNative = !isVirtual && LDDisplayServicesCanChangeBrightness(displayID)
@@ -343,7 +372,7 @@ final class DisplayController: ObservableObject {
 
             let awaitingDDC = savedBackend == .ddc && !supported.contains(.ddc) &&
                 ports[NSNumber(value: displayID)] != nil && LDIOAVServiceIsAvailable() && DisplayTopology.uuid(displayID) != nil
-            let item = DisplayItem(
+            var item = DisplayItem(
                 id: displayID,
                 uuidString: uuidString,
                 name: name,
@@ -370,18 +399,16 @@ final class DisplayController: ObservableObject {
                 ddcTechnicalDetail: previous?.ddcTechnicalDetail ?? "",
                 awaitingPreferredDDC: awaitingDDC,
                 ddcReadable: channels[displayID] != nil && previous?.ddcReadable == true,
-                ddcMaxValue: previous?.ddcMaxValue ?? 100,
+                ddcMaxValue: channels[displayID] == nil ? 100 : (previous?.ddcMaxValue ?? 100),
                 modes: modeBundle.modes,
                 currentResolutionRefreshModes: modeBundle.currentRefreshModes,
                 inlineError: previous?.inlineError
             )
 
-            builtItems.append(item)
-
             // Sync mirror state with VirtualDisplayManager
             if let record = virtualDisplayManager.mirrorRecord(forPhysicalDisplayID: displayID) {
                 mirrorStates[displayID] = virtualDisplayManager.isPending(record.id) ? .connecting : .active
-            } else if case .active = mirrorStates[displayID] {
+            } else if mirrorStates[displayID]?.isActive == true || mirrorStates[displayID]?.isConnecting == true {
                 mirrorStates[displayID] = .idle
             }
 
@@ -391,19 +418,21 @@ final class DisplayController: ObservableObject {
                 softwareDimmer.setOverlayBrightness(item.brightness, for: displayID)
             } else if activeBackend == .softwareGamma && previous?.activeBackend != .softwareGamma {
                 if !softwareDimmer.setGammaBrightness(item.brightness, for: displayID) {
-                    setInlineError("저장된 감마 밝기를 적용하지 못했습니다.", for: displayID)
+                    item.inlineError = "저장된 감마 밝기를 적용하지 못했습니다."
                 }
             }
+            builtItems.append(item)
         }
 
         // Sort physically left-to-right (frameMinX) so cards match desk layout; virtual screens last.
         displays = builtItems.sorted { lhs, rhs in
             if lhs.isVirtual != rhs.isVirtual { return !lhs.isVirtual }
-            if abs(lhs.frameMinX - rhs.frameMinX) > 20 { return lhs.frameMinX < rhs.frameMinX }
+            if lhs.frameMinX != rhs.frameMinX { return lhs.frameMinX < rhs.frameMinX }
             if lhs.isMain != rhs.isMain { return lhs.isMain }
             return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
 
+        if pendingModeRevert != nil { _ = currentPreview() }
         softwareDimmer.syncOverlayFrames(online: Set(onlineIDs))
         updateCursorDisplay()
 
@@ -412,7 +441,7 @@ final class DisplayController: ObservableObject {
             guard let port = ports[NSNumber(value: item.id)], LDIOAVServiceIsAvailable() else {
                 if let i = displays.firstIndex(where: { $0.id == item.id }) {
                     displays[i].ddcUserStatus = "직접 제어 미지원"
-                    displays[i].ddcTechnicalDetail = "직결된 외부 포트(AVService)를 찾지 못해 소프트웨어 디밍을 사용합니다."
+                    displays[i].ddcTechnicalDetail = "직접 제어용 외부 포트(AVService)를 찾지 못했습니다."
                 }
                 continue
             }
@@ -430,7 +459,7 @@ final class DisplayController: ObservableObject {
     private func probeDDC(_ item: DisplayItem, channel: DDCChannel) {
         let version = inputVersion[item.id, default: 0]
         channel.probe { [weak self, weak channel] reading in
-            guard let self, let channel, self.channels[item.id] === channel,
+            guard let self, let channel, self.channels[item.id] === channel, DisplayTopology.uuid(item.id) == channel.uuid,
                   let i = self.displays.firstIndex(where: { $0.uuidString == channel.uuid && $0.id == item.id })
             else { return }
             let wasWaiting = self.displays[i].awaitingPreferredDDC
@@ -493,9 +522,11 @@ final class DisplayController: ObservableObject {
         displays[idx].inlineError = nil
         inputVersion[displayID, default: 0] += 1
         if showOSD {
+            clearIdentify()
             hudGeneration += 1
             hudDisplay = displayID
         }
+        if !showOSD && hudDisplay == displayID { hudDisplay = nil }
         if smoothTargetValue[displayID] == nil { smoothRenderedValue[displayID] = item.brightness }
         displays[idx].brightness = clamped
 
@@ -512,10 +543,11 @@ final class DisplayController: ObservableObject {
         guard let channel = channels[id], let i = displays.firstIndex(where: { $0.id == id }) else { return }
         let requested = UInt16((level * Double(item.ddcMaxValue)).rounded())
         displays[i].ddcUserStatus = "적용 중"
+        if lastDDCLevel[id] == nil { lastDDCLevel[id] = item.brightness }
         ddcInFlight.insert(id)
         let hudTicket = hudGeneration
         if showOSD {
-            let warn = item.ddcReadable ? nil : "응답 미확인"
+            let warn = item.ddcReadable ? "적용 중" : "응답 미확인"
             osdController.show(displayID: item.id, displayName: hudTitle, warningBadge: warn, brightness: level)
         }
         channel.write(requested, verify: item.ddcReadable) { [weak self, weak channel] result in
@@ -531,18 +563,23 @@ final class DisplayController: ObservableObject {
                 self.displays[i].inlineError = "모니터 밝기 신호 전송에 실패했습니다. 소프트웨어 디밍으로 바꿔보세요."
                 warningBadge = "모니터 응답 없음"
             case .sent:
-                self.displays[i].ddcUserStatus = item.ddcReadable ? "연결됨" : "신호 전송됨 (미확인)"
+                if !item.ddcReadable { self.lastDDCLevel[id] = level }
+                self.displays[i].ddcUserStatus = item.ddcReadable ? "확인 중" : "신호 전송됨 (미확인)"
             case .readback(let reading):
-                if let actual = reading.fraction {
+                if let reading, let actual = reading.fraction {
                     self.lastDDCLevel[id] = actual
                     self.displays[i].ddcMaxValue = reading.maximum
                     reported = actual
                     self.displays[i].ddcUserStatus = "연결됨"
                     self.displays[i].ddcTechnicalDetail = "포트 \(channel.port) · \(reading.description)"
+                    if abs(level - actual) > 0.5 / Double(reading.maximum) + 1e-9 {
+                        warningBadge = "장치 밝기"
+                        self.displays[i].ddcUserStatus = "요청값과 다름"
+                    }
                     self.displays[i].inlineError = nil
                 } else {
                     self.displays[i].ddcUserStatus = "확인 실패"
-                    self.displays[i].ddcTechnicalDetail = "포트 \(channel.port) · \(reading.description)"
+                    self.displays[i].ddcTechnicalDetail = "포트 \(channel.port) · " + (reading?.description ?? "디스플레이 연결 변경")
                     warningBadge = "상태 확인 실패"
                 }
             }
@@ -552,16 +589,8 @@ final class DisplayController: ObservableObject {
                 self.ddcInFlight.remove(id)
             }
             self.displays[i].brightness = reported
-            let shouldUpdateHUD: Bool = {
-                switch result {
-                case .failed: return true
-                case .sent: return false
-                case .readback(let reading):
-                    guard let actual = reading.fraction else { return true }
-                    return abs(level - actual) > 0.5 / Double(reading.maximum) + 1e-9
-                }
-            }()
-            if showOSD && shouldUpdateHUD && self.hudGeneration == hudTicket {
+            if case .sent = result { return }
+            if showOSD && self.hudGeneration == hudTicket {
                 self.osdController.show(displayID: item.id, displayName: hudTitle, warningBadge: warningBadge, brightness: reported)
             }
         }
@@ -660,16 +689,16 @@ final class DisplayController: ObservableObject {
     private func writeNative(_ value: Double, id: CGDirectDisplayID, hudTitle: String? = nil) -> Bool {
         guard LDDisplayServicesSetBrightness(id, Float(value)) else {
             var current: Float = 0
-            if let i = displays.firstIndex(where: { $0.id == id }), LDDisplayServicesGetBrightness(id, &current) {
-                displays[i].brightness = Double(current)
+            if let i = displays.firstIndex(where: { $0.id == id }) {
+                if LDDisplayServicesGetBrightness(id, &current) { displays[i].brightness = Double(current) }
                 displays[i].inlineError = "하드웨어 밝기를 변경하지 못했습니다."
                 if hudDisplay == id {
-                    osdController.show(displayID: id, displayName: hudTitle ?? displays[i].name, warningBadge: "밝기 변경 실패", brightness: Double(current))
+                    osdController.show(displayID: id, displayName: hudTitle ?? displays[i].name, warningBadge: "밝기 변경 실패", brightness: displays[i].brightness)
                 }
             }
             return false
         }
-        lastNativeWriteTime[id] = Date()
+        lastNativeWriteTime[id] = .now
         return true
     }
 
@@ -734,7 +763,7 @@ final class DisplayController: ObservableObject {
 
             switch backend {
             case .native:
-                if next == target || Date().timeIntervalSince(lastNativeWriteTime[displayID] ?? .distantPast) >= 1.0 / 60 {
+                if next == target || lastNativeWriteTime[displayID].map({ $0.duration(to: .now) >= .seconds(1.0 / 60) }) != false {
                     if !writeNative(next, id: displayID) { finishedIDs.append(displayID) }
                 }
             case .softwareOverlay:
@@ -807,8 +836,8 @@ final class DisplayController: ObservableObject {
         guard let idx = displays.firstIndex(where: { $0.id == displayID }) else { return }
 
         if displays[idx].activeBackend == .native {
-            let elapsed = lastNativeWriteTime[displayID].map { Date().timeIntervalSince($0) } ?? 10.0
-            if elapsed > 0.8 && smoothTargetValue[displayID] == nil {
+            let elapsed = lastNativeWriteTime[displayID]?.duration(to: .now) ?? .seconds(10)
+            if elapsed > .milliseconds(800) && smoothTargetValue[displayID] == nil {
                 var currentNative: Float = Float(displays[idx].brightness)
                 if LDDisplayServicesGetBrightness(displayID, &currentNative) {
                     displays[idx].brightness = Double(currentNative)
@@ -823,78 +852,99 @@ final class DisplayController: ObservableObject {
 
     // MARK: - Resolution & HiDPI (with 15s External Revert Safeguard)
 
-    func applyDisplayMode(_ mode: DisplayModeItem, for displayID: CGDirectDisplayID) {
-        guard !isShuttingDown, !topologyChanging else { return }
-        let display = displays.first(where: { $0.id == displayID })
-        let previousMode = CGDisplayCopyDisplayMode(displayID)
+    func applyDisplayMode(_ mode: DisplayModeItem, for display: DisplayItem) {
+        let displayID = display.id
+        guard !isShuttingDown, !topologyChanging, pendingModeRevert == nil,
+              !mirrorState(for: displayID).isConnecting,
+              DisplayTopology.uuid(displayID) == display.uuidString,
+              let previous = CGDisplayCopyDisplayMode(displayID),
+              previous.ioDisplayModeID != mode.cgMode.ioDisplayModeID else { return }
 
-        let ok = DisplayModeManager.applyMode(mode, to: displayID)
-        if !ok {
+        let scope: CGConfigureOption = display.isBuiltIn ? .permanently : .forAppOnly
+        guard DisplayModeManager.applyMode(mode.cgMode, to: displayID, scope: scope) else {
             setInlineError("해상도를 변경하지 못했습니다.", for: displayID)
             return
         }
-
-        // Start 15-second keep/revert countdown for external displays to protect against black/unsupported modes.
-        if let display, !display.isBuiltIn, let previousMode, previousMode.ioDisplayModeID != mode.cgMode.ioDisplayModeID {
-            startModeRevertCountdown(displayID: displayID, displayName: display.name, previousMode: previousMode)
+        if !display.isBuiltIn {
+            let preview = PendingModeRevert(displayUUID: display.uuidString, previewMode: mode.cgMode,
+                deadline: .now.advanced(by: .seconds(15)), displayID: displayID,
+                displayName: display.name, previousMode: previous, secondsRemaining: 15)
+            pendingModeRevert = preview
+            let token = preview.token
+            let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.tickPreview(token) }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            revertTimer = timer
         }
+        if !reconfigRegistered { refreshDisplays() }
+    }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            self?.refreshDisplays()
+    private func tickPreview(_ token: UUID) {
+        guard var preview = pendingModeRevert, preview.token == token else { return }
+        let remaining = ContinuousClock.now.duration(to: preview.deadline)
+        if remaining <= .zero {
+            revertPendingMode()
+        } else {
+            let parts = remaining.components
+            preview.secondsRemaining = Int(parts.seconds) + (parts.attoseconds > 0 ? 1 : 0)
+            pendingModeRevert = preview
         }
     }
 
-    private func startModeRevertCountdown(displayID: CGDirectDisplayID, displayName: String, previousMode: CGDisplayMode) {
+    private func endPreview() {
         revertTimer?.invalidate()
-        pendingModeRevert = PendingModeRevert(
-            displayID: displayID,
-            displayName: displayName,
-            previousMode: previousMode,
-            secondsRemaining: 15
-        )
-        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self, var pending = self.pendingModeRevert else {
-                    self?.revertTimer?.invalidate()
-                    self?.revertTimer = nil
-                    return
+        revertTimer = nil
+        pendingModeRevert = nil
+    }
+
+    /// Never restore onto a reused display ID or overwrite a subsequent change made in System Settings.
+    private func currentPreview() -> PendingModeRevert? {
+        guard let preview = pendingModeRevert else { return nil }
+        let id = preview.displayID
+        if CGDisplayIsOnline(id) != 0 {
+            guard let uuid = DisplayTopology.uuid(id), let current = CGDisplayCopyDisplayMode(id) else {
+                // A wake or a reconfiguration can temporarily hide the mode. Keep the recovery record.
+                if ContinuousClock.now >= preview.deadline && preview.secondsRemaining != 0 {
+                    pendingModeRevert?.secondsRemaining = 0
                 }
-                pending.secondsRemaining -= 1
-                if pending.secondsRemaining <= 0 {
-                    self.revertPendingMode()
-                } else {
-                    self.pendingModeRevert = pending
-                }
+                return nil
+            }
+            if uuid == preview.displayUUID && current.ioDisplayModeID == preview.previewMode.ioDisplayModeID {
+                return preview
             }
         }
-        RunLoop.main.add(timer, forMode: .common)
-        revertTimer = timer
+        endPreview()
+        showBanner(.info, "화면 연결 또는 모드가 변경되어 해상도 확인을 종료했습니다.")
+        return nil
     }
 
     func keepPendingMode() {
-        revertTimer?.invalidate()
-        revertTimer = nil
-        pendingModeRevert = nil
+        guard let preview = currentPreview() else { return }
+        if ContinuousClock.now >= preview.deadline {
+            revertPendingMode()
+            return
+        }
+        guard DisplayModeManager.applyMode(preview.previewMode, to: preview.displayID, scope: .permanently) else {
+            showBanner(.error, "선택한 해상도를 저장하지 못했습니다.")
+            return
+        }
+        endPreview()
     }
 
     func revertPendingMode() {
-        revertTimer?.invalidate()
-        revertTimer = nil
-        guard let pending = pendingModeRevert else { return }
-        pendingModeRevert = nil
-
-        var config: CGDisplayConfigRef?
-        if CGBeginDisplayConfiguration(&config) == .success, let cfg = config {
-            if CGConfigureDisplayWithDisplayMode(cfg, pending.displayID, pending.previousMode, nil) == .success {
-                _ = CGCompleteDisplayConfiguration(cfg, .permanently)
-            } else {
-                CGCancelDisplayConfiguration(cfg)
-            }
+        guard var preview = currentPreview() else { return }
+        guard DisplayModeManager.applyMode(preview.previousMode, to: preview.displayID, scope: .forAppOnly) else {
+            revertTimer?.invalidate()
+            revertTimer = nil
+            preview.secondsRemaining = 0
+            pendingModeRevert = preview
+            showBanner(.error, "이전 해상도를 복구하지 못했습니다. 되돌리기를 다시 시도하세요.")
+            return
         }
-        showBanner(.info, "\(pending.displayName) 해상도를 이전 설정으로 되돌렸습니다.")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            self?.refreshDisplays()
-        }
+        endPreview()
+        showBanner(.info, "\(preview.displayName) 해상도를 이전 설정으로 되돌렸습니다.")
+        refreshDisplays()
     }
 
     // MARK: - Virtual HiDPI Mirroring
@@ -908,21 +958,24 @@ final class DisplayController: ObservableObject {
     }
 
     func toggleVirtualHiDPIMirror(for display: DisplayItem) {
-        guard !isShuttingDown, !topologyChanging else { return }
-        if case .connecting = mirrorState(for: display.id) { return }
+        guard !isShuttingDown, DisplayTopology.uuid(display.id) == display.uuidString else { return }
 
         if let record = virtualDisplayManager.mirrorRecord(forPhysicalDisplayID: display.id) {
+            let connecting = virtualDisplayManager.isPending(record.id)
+            guard connecting || (!topologyChanging && pendingModeRevert == nil) else { return }
             guard virtualDisplayManager.removeVirtualDisplay(id: record.id) else {
                 mirrorStates[display.id] = .failed("기존 미러 구성을 복원하지 못했습니다. 다시 시도해 주세요.")
                 setInlineError("기존 미러 구성을 복원하지 못했습니다.", for: display.id)
                 return
             }
             mirrorStates[display.id] = .idle
-            showBanner(.success, "\(display.name) 가상 HiDPI 미러링을 해제했습니다.")
+            setInlineError(nil, for: display.id)
+            showBanner(.success, connecting ? "가상 HiDPI 연결을 취소했습니다." : "\(display.name) 가상 HiDPI 미러링을 해제했습니다.")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
                 self?.refreshDisplays()
             }
         } else {
+            guard !topologyChanging, pendingModeRevert == nil else { return }
             guard virtualDisplayManager.isSupported else {
                 mirrorStates[display.id] = .failed("이 macOS 버전에서는 가상 HiDPI를 지원하지 않습니다.")
                 setInlineError("이 macOS 버전에서는 가상 HiDPI를 지원하지 않습니다.", for: display.id)
@@ -931,18 +984,16 @@ final class DisplayController: ObservableObject {
             mirrorStates[display.id] = .connecting
             setInlineError(nil, for: display.id)
             virtualDisplayManager.enableHiDPIMirror(for: display) { [weak self] ok, reason in
-                Task { @MainActor in
-                    guard let self else { return }
-                    if ok {
-                        self.mirrorStates[display.id] = .active
-                        self.showBanner(.success, "\(display.name) 가상 HiDPI 미러링이 켜졌습니다.")
-                    } else {
-                        let msg = reason ?? "가상 HiDPI 미러링을 시작하지 못했습니다."
-                        self.mirrorStates[display.id] = .failed(msg)
-                        self.setInlineError(msg, for: display.id)
-                    }
-                    self.refreshDisplays()
+                guard let self, !self.isShuttingDown, DisplayTopology.uuid(display.id) == display.uuidString else { return }
+                if ok {
+                    self.mirrorStates[display.id] = .active
+                    self.showBanner(.success, "\(display.name) 가상 HiDPI 미러링이 켜졌습니다.")
+                } else {
+                    let msg = reason ?? "가상 HiDPI 미러링을 시작하지 못했습니다."
+                    self.mirrorStates[display.id] = .failed(msg)
+                    self.setInlineError(msg, for: display.id)
                 }
+                self.refreshDisplays()
             }
         }
     }
@@ -1023,6 +1074,7 @@ final class DisplayController: ObservableObject {
 
     fileprivate func configurationChanged(beginning: Bool) {
         guard !isShuttingDown else { return }
+        clearIdentify()
         topologyChanging = true
         for channel in channels.values { channel.invalidate() }
         channels.removeAll()
@@ -1043,8 +1095,8 @@ final class DisplayController: ObservableObject {
     func cleanupOnTerminate() {
         guard !isShuttingDown else { return }
         isShuttingDown = true
-        revertTimer?.invalidate()
-        revertTimer = nil
+        revertPendingMode()
+        endPreview()
         bannerDismissItem?.cancel()
         identifyWorkItem?.cancel()
         if reconfigRegistered {

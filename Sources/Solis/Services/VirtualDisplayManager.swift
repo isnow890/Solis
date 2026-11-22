@@ -55,6 +55,19 @@ final class VirtualDisplayManager {
         activeVirtualDisplays.first { $0.mirroredPhysicalDisplayID == physicalID }
     }
 
+    /// A user can unplug the target or change the mirror in System Settings.
+    /// Expose the surviving virtual display in Settings so it can still be removed.
+    func reconcileMirrors(online: Set<CGDirectDisplayID>) {
+        for (id, request) in mirrors where request.committed && !isPending(id) {
+            guard let record = records[id], let physical = record.mirroredPhysicalDisplayID else { continue }
+            if online.contains(physical), CGDisplayMirrorsDisplay(physical) == record.handle.displayID,
+               DisplayTopology.uuid(physical).map({ $0 == request.physicalUUID }) != false { continue }
+            records[id]?.mirroredPhysicalDisplayID = nil
+            records[id]?.mirroredPhysicalDisplayName = nil
+            mirrors.removeValue(forKey: id)
+        }
+    }
+
     /// Creates a standalone HiDPI virtual display from a preset.
     @discardableResult
     func createVirtualDisplay(
@@ -197,8 +210,10 @@ final class VirtualDisplayManager {
     }
 
     private func failMirror(_ id: UUID, reason: String) {
-        finishMirror(id, success: false, reason: reason)
-        _ = removeVirtualDisplay(id: id)
+        let completion = mirrors[id]?.completion
+        mirrors[id]?.completion = nil
+        let removed = removeVirtualDisplay(id: id)
+        completion?(false, removed ? reason : "기존 미러 구성을 복원하지 못했습니다. 미러링 해제를 다시 시도하세요.")
     }
 
     private func matches(_ mode: CGDisplayMode, specs: [LDVirtualDisplayModeSpec]) -> Bool {
@@ -228,9 +243,11 @@ final class VirtualDisplayManager {
         if let request = mirrors[id], request.committed, let physical = record.mirroredPhysicalDisplayID,
            DisplayTopology.uuid(physical) == request.physicalUUID,
            CGDisplayMirrorsDisplay(physical) == record.handle.displayID {
-            let restore = request.previousMasterUUID.flatMap { uuid in
-                DisplayTopology.onlineIDs()?.first { DisplayTopology.uuid($0) == uuid }
-            } ?? kCGNullDirectDisplay
+            var restore = kCGNullDirectDisplay
+            if let uuid = request.previousMasterUUID {
+                guard let online = DisplayTopology.onlineIDs() else { return false }
+                restore = online.first { DisplayTopology.uuid($0) == uuid } ?? kCGNullDirectDisplay
+            }
             guard LDMirrorDisplay(physical, restore) else { return false }
         }
         mirrors.removeValue(forKey: id)
@@ -275,10 +292,10 @@ final class VirtualDisplayManager {
             serialNumber: serial,
             terminationHandler: { [weak self] in
                 Task { @MainActor in
-                    self?.finishMirror(id, success: false, reason: "가상 디스플레이가 시스템에 의해 종료되었습니다.")
-                    self?.pending.removeValue(forKey: id)?.cancel()
-                    self?.mirrors.removeValue(forKey: id)
-                    self?.records.removeValue(forKey: id)
+                    guard let self, self.records.removeValue(forKey: id) != nil else { return }
+                    self.pending.removeValue(forKey: id)?.cancel()
+                    let request = self.mirrors.removeValue(forKey: id)
+                    request?.completion?(false, "가상 디스플레이가 시스템에 의해 종료되었습니다.")
                     onChange()
                 }
             }

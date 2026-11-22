@@ -173,6 +173,7 @@ final class BrightnessOSDController {
     }
 
     func showIdentify(displayID: CGDirectDisplayID, displayName: String) {
+        guard model.mode != .brightness || panel?.isVisible != true else { return }
         guard let screen = DisplayTopology.screen(for: displayID) else { return }
         generation += 1
         let currentGeneration = generation

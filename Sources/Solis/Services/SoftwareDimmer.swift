@@ -108,7 +108,8 @@ final class SoftwareDimmer {
         panel.hidesOnDeactivate = false
         panel.canHide = false
         panel.isReleasedWhenClosed = false
-        panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.screenSaverWindow)) - 1)
+        // Leave the menu bar, popover and its native picker menus legible.
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue - 1)
         panel.collectionBehavior = [
             .canJoinAllSpaces,
             .fullScreenAuxiliary,

@@ -9,7 +9,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
     private var controller: DisplayController?
-    private var eventMonitor: Any?
+    private var globalMonitor: Any?
+    private var localMonitor: Any?
+    private let updates = UpdateChecker()
+    private var closingPopover = false
+    private var reopenAfterClose = false
     private var predecessorExit: DispatchSourceProcess?
 
     static func main() {
@@ -52,23 +56,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         setupStatusItem()
         setupPopover(controller: controller)
+        updates.start()
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(spaceChanged(_:)),
+            name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
         controller?.refreshAccessibilityStatus()
     }
 
+    func applicationDidResignActive(_ notification: Notification) {
+        closePopover()
+    }
+
+    @objc private func spaceChanged(_ notification: Notification) {
+        closePopover()
+    }
+
+    func applicationDidChangeScreenParameters(_ notification: Notification) {
+        if popover?.isShown == true { updatePopoverHeight() }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
-        if let monitor = eventMonitor {
-            NSEvent.removeMonitor(monitor)
-            eventMonitor = nil
-        }
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        removeOutsideClickMonitor()
+        updates.stop()
         controller?.cleanupOnTerminate()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if let button = statusItem?.button {
-            togglePopover(button)
+            openPopover(button)
         }
         return false
     }
@@ -251,7 +269,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.delegate = self
 
         let hosting = NSHostingController(
-            rootView: MenuBarPopoverView(controller: controller)
+            rootView: MenuBarPopoverView(controller: controller, updates: updates)
         )
         hosting.sizingOptions = [.preferredContentSize]
         popover.contentViewController = hosting
@@ -276,59 +294,102 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func togglePopover(_ sender: NSStatusBarButton) {
-        guard let popover else { return }
-        if popover.isShown {
+        if closingPopover {
+            reopenAfterClose.toggle()
+        } else if popover?.isShown == true {
             closePopover()
         } else {
-            if let screen = sender.window?.screen {
-                controller?.popoverAvailableHeight = max(280, screen.visibleFrame.height - 24)
-            }
-            controller?.refreshAccessibilityStatus()
-            controller?.refreshDisplays()
-            controller?.startCursorTracking()
-            NSApp.activate(ignoringOtherApps: true)
-            popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
-            // Keep popover readable even when software overlay dims the screen toward 0% (P2)
-            if let popWindow = popover.contentViewController?.view.window {
-                popWindow.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.screenSaverWindow)) + 2)
-            }
-            installOutsideClickMonitor()
+            openPopover(sender)
         }
     }
 
+    private func updatePopoverHeight() {
+        if let screen = statusItem?.button?.window?.screen {
+            controller?.popoverAvailableHeight = max(1, screen.visibleFrame.height - 24)
+        }
+    }
+
+    private func openPopover(_ sender: NSStatusBarButton) {
+        if closingPopover {
+            reopenAfterClose = true
+            return
+        }
+        guard let popover, !popover.isShown else { return }
+        updatePopoverHeight()
+        controller?.refreshAccessibilityStatus()
+        controller?.refreshDisplays()
+        NSApp.activate(ignoringOtherApps: true)
+        controller?.startCursorTracking()
+        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+        guard popover.isShown else {
+            controller?.stopCursorTracking()
+            return
+        }
+        if let popWindow = popover.contentViewController?.view.window {
+            popWindow.level = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue - 1)
+        }
+        installOutsideClickMonitor()
+    }
+
     private func closePopover() {
+        reopenAfterClose = false
+        guard popover?.isShown == true, !closingPopover else { return }
         popover?.performClose(nil)
+    }
+
+    func popoverWillClose(_ notification: Notification) {
+        closingPopover = true
         controller?.stopCursorTracking()
         removeOutsideClickMonitor()
     }
 
     func popoverDidClose(_ notification: Notification) {
-        controller?.stopCursorTracking()
-        removeOutsideClickMonitor()
+        closingPopover = false
+        if reopenAfterClose, let button = statusItem?.button {
+            reopenAfterClose = false
+            openPopover(button)
+        }
     }
 
     private func installOutsideClickMonitor() {
         removeOutsideClickMonitor()
-        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            Task { @MainActor in
-                if self?.popover?.isShown == true {
-                    self?.closePopover()
+        let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: clicks) { [weak self] _ in
+            self?.closePopover()
+        }
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: clicks.union(.keyDown)) { [weak self] event in
+            guard let self else { return event }
+            if event.type == .keyDown {
+                if event.keyCode == 53 {
+                    self.closePopover()
+                    return nil
                 }
+            } else if let window = event.window,
+                      window !== self.statusItem?.button?.window,
+                      window.level.rawValue < NSWindow.Level.popUpMenu.rawValue {
+                var ancestor: NSWindow? = window
+                while let current = ancestor {
+                    if current === self.popover?.contentViewController?.view.window { return event }
+                    ancestor = current.parent
+                }
+                self.closePopover()
             }
+            return event
         }
     }
 
     private func removeOutsideClickMonitor() {
-        if let monitor = eventMonitor {
-            NSEvent.removeMonitor(monitor)
-            eventMonitor = nil
-        }
+        if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
+        if let localMonitor { NSEvent.removeMonitor(localMonitor) }
+        globalMonitor = nil
+        localMonitor = nil
     }
 
     // MARK: - Rich Right-Click Context Menu (P1-13)
 
     private func showContextMenu(from button: NSStatusBarButton) {
         let menu = NSMenu()
+        menu.autoenablesItems = false
 
         let header = NSMenuItem(title: "키보드 밝기 대상", action: nil, keyEquivalent: "")
         header.isEnabled = false
@@ -336,6 +397,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         for mode in BrightnessKeyTargetMode.allCases {
             let item = NSMenuItem(title: mode.title, action: #selector(selectTargetModeFromMenu(_:)), keyEquivalent: "")
+            item.isEnabled = controller?.isAccessibilityGranted == true
             item.representedObject = mode.rawValue
             item.state = (controller?.keyTargetMode == mode) ? .on : .off
             item.target = self
@@ -347,6 +409,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let settingsItem = NSMenuItem(title: "설정…", action: #selector(openSettingsFromMenu), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
+
+        let updateItem = NSMenuItem(title: "업데이트 확인…", action: #selector(checkUpdatesFromMenu), keyEquivalent: "")
+        updateItem.target = self
+        menu.addItem(updateItem)
 
         let loginItem = NSMenuItem(title: "로그인 시 자동 실행", action: #selector(toggleLoginFromMenu), keyEquivalent: "")
         loginItem.state = (controller?.launchAtLogin == true) ? .on : .off
@@ -364,9 +430,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         quitItem.target = self
         menu.addItem(quitItem)
 
-        statusItem?.menu = menu
-        button.performClick(nil)
-        statusItem?.menu = nil
+        let edge = button.isFlipped ? button.bounds.maxY : button.bounds.minY
+        menu.popUp(positioning: nil, at: NSPoint(x: button.bounds.minX, y: edge), in: button)
     }
 
     @objc private func selectTargetModeFromMenu(_ sender: NSMenuItem) {
@@ -377,9 +442,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     @objc private func openSettingsFromMenu() {
         controller?.showSettingsInPopover = true
-        if let button = statusItem?.button, popover?.isShown != true {
-            togglePopover(button)
+        if let button = statusItem?.button {
+            openPopover(button)
         }
+    }
+
+    @objc private func checkUpdatesFromMenu() {
+        if let button = statusItem?.button { openPopover(button) }
+        updates.checkManually()
     }
 
     @objc private func toggleLoginFromMenu() {

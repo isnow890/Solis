@@ -95,15 +95,17 @@ enum VirtualMirrorState: Equatable {
 }
 
 struct PendingModeRevert: Equatable {
+    let token = UUID()
+    let displayUUID: String
+    let previewMode: CGDisplayMode
+    let deadline: ContinuousClock.Instant
     let displayID: CGDirectDisplayID
     let displayName: String
     let previousMode: CGDisplayMode
     var secondsRemaining: Int
 
     static func == (lhs: PendingModeRevert, rhs: PendingModeRevert) -> Bool {
-        lhs.displayID == rhs.displayID &&
-        lhs.secondsRemaining == rhs.secondsRemaining &&
-        lhs.previousMode.ioDisplayModeID == rhs.previousMode.ioDisplayModeID
+        lhs.token == rhs.token && lhs.secondsRemaining == rhs.secondsRemaining
     }
 }
 

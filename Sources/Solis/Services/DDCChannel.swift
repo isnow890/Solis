@@ -35,7 +35,7 @@ final class DDCChannel {
     enum WriteResult {
         case failed
         case sent
-        case readback(DDCReading)
+        case readback(DDCReading?)
     }
 
     let port: String
@@ -45,10 +45,14 @@ final class DDCChannel {
     private var service: CFTypeRef? // Access exclusively on queue.
     private var readProfile: UInt8 = 0 // Access exclusively on queue.
     private var probeWork: DispatchWorkItem?
-    private var writeWork: DispatchWorkItem?
     private var verifyWork: DispatchWorkItem?
 
-    private var pendingWrite: (value: UInt16, verify: Bool, version: Int, completion: (WriteResult) -> Void)?
+    // The port queue takes the latest request only when it is actually ready for I/O.
+    // The lock covers the mailbox and its cancellation generation, never a hardware call.
+    private let mailbox = NSLock()
+    private var epoch = 0
+    private typealias PendingWrite = (value: UInt16, verify: Bool, version: Int, completion: (WriteResult) -> Void)
+    private var pendingWrite: PendingWrite?
     private(set) var revision = 0
 
     init(id: CGDirectDisplayID, uuid: String, port: String, queue: DispatchQueue) {
@@ -72,10 +76,11 @@ final class DDCChannel {
 
     func cancelWrites() {
         revision += 1
-        pendingWrite = nil
-        writeWork?.cancel()
+        mailbox.withLock {
+            epoch += 1
+            pendingWrite = nil
+        }
         verifyWork?.cancel()
-        writeWork = nil
         verifyWork = nil
     }
 
@@ -84,50 +89,44 @@ final class DDCChannel {
         let version = revision
         verifyWork?.cancel()
         verifyWork = nil
-        pendingWrite = (value, verify, version, completion)
-
-        // Coalesce rapid repeats without starving writes while a key is held down.
-        guard writeWork == nil else { return }
-        scheduleNextWriteFlush()
+        let scheduledEpoch: Int? = mailbox.withLock {
+            let needsFlush = pendingWrite == nil
+            pendingWrite = (value, verify, version, completion)
+            return needsFlush ? epoch : nil
+        }
+        guard let scheduledEpoch else { return }
+        queue.asyncAfter(deadline: .now() + .milliseconds(30)) { [weak self] in
+            self?.flush(epoch: scheduledEpoch)
+        }
     }
 
-    private func scheduleNextWriteFlush() {
-        let task = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            self.writeWork = nil
-            guard let request = self.pendingWrite else { return }
-            self.pendingWrite = nil
-
-            self.queue.async { [weak self] in
-                guard let self else { return }
-                if self.service == nil, DisplayTopology.uuid(self.id) == self.uuid {
-                    self.service = LDCreateAVServiceForPort(self.port)
-                }
-                let ok = DisplayTopology.uuid(self.id) == self.uuid &&
-                    self.service.map { LDDDCWriteVCP($0, 0x10, request.value) } == true
-
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    // If newer input arrived while writing, flush it next; report result if still latest.
-                    if self.pendingWrite != nil && self.writeWork == nil {
-                        self.scheduleNextWriteFlush()
-                    }
-                    guard self.revision == request.version else { return }
-                    request.completion(ok ? .sent : .failed)
-                    if ok && request.verify && self.revision == request.version {
-                        self.scheduleVerification(request.version, completion: request.completion)
-                    }
-                }
+    private func flush(epoch scheduledEpoch: Int) {
+        let request: PendingWrite? = mailbox.withLock {
+            guard epoch == scheduledEpoch else { return nil }
+            defer { pendingWrite = nil }
+            return pendingWrite
+        }
+        guard let request else { return }
+        let ok: Bool
+        if DisplayTopology.uuid(id) == uuid {
+            if service == nil { service = LDCreateAVServiceForPort(port) }
+            ok = service.map { LDDDCWriteVCP($0, 0x10, request.value) } == true
+        } else {
+            ok = false
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, revision == request.version else { return }
+            request.completion(ok ? .sent : .failed)
+            if ok && request.verify && revision == request.version {
+                scheduleVerification(request.version, completion: request.completion)
             }
         }
-        writeWork = task
-        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(30), execute: task)
     }
 
     private func scheduleVerification(_ version: Int, completion: @escaping (WriteResult) -> Void) {
         let task = DispatchWorkItem { [weak self] in
-            guard let self, DisplayTopology.uuid(id) == uuid, let service else { return }
-            let reading = DDCReading(service: service, profile: &self.readProfile)
+            guard let self else { return }
+            let reading = DisplayTopology.uuid(id) == uuid ? service.map { DDCReading(service: $0, profile: &self.readProfile) } : nil
             DispatchQueue.main.async {
                 if self.revision == version { completion(.readback(reading)) }
             }

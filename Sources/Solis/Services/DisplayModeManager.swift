@@ -84,17 +84,17 @@ enum DisplayModeManager {
 
     /// Switches the display to the chosen mode.
     @discardableResult
-    static func applyMode(_ modeItem: DisplayModeItem, to displayID: CGDirectDisplayID) -> Bool {
+    static func applyMode(_ mode: CGDisplayMode, to displayID: CGDirectDisplayID, scope: CGConfigureOption) -> Bool {
         var config: CGDisplayConfigRef?
         guard CGBeginDisplayConfiguration(&config) == .success, let cfg = config else {
             return false
         }
-        let err = CGConfigureDisplayWithDisplayMode(cfg, displayID, modeItem.cgMode, nil)
+        let err = CGConfigureDisplayWithDisplayMode(cfg, displayID, mode, nil)
         guard err == .success else {
             CGCancelDisplayConfiguration(cfg)
             return false
         }
-        return CGCompleteDisplayConfiguration(cfg, .permanently) == .success
+        return CGCompleteDisplayConfiguration(cfg, scope) == .success
     }
 
     /// Generates a macOS Display Override plist (`scale-resolutions`) for persistent native HiDPI.

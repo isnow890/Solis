@@ -64,22 +64,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func showInitialPermissionGuide() {
-        guard let controller, !controller.isAccessibilityGranted, !controller.needsPermissionRelaunch,
-              !UserDefaults.standard.bool(forKey: Self.didShowPermissionGuide) else { return }
+        guard let controller,
+              let alert = Self.initialPermissionAlert(for: controller.keyStatus, defaults: .standard) else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            controller.requestAccessibilityPermission()
+        } else {
+            controller.permissionBannerDeferred = true
+        }
+    }
 
+    static func initialPermissionAlert(for status: BrightnessKeyMonitor.Status, defaults: UserDefaults) -> NSAlert? {
+        guard !status.ready, !status.needsRelaunch, !defaults.bool(forKey: didShowPermissionGuide) else { return nil }
         let alert = NSAlert()
         alert.messageText = "키보드로 화면 밝기를 조절할까요?"
         alert.informativeText = BrightnessKeyMonitor.permissionExplanation
             + "\n\n‘나중에’를 선택해도 메뉴 막대에서 밝기와 해상도를 조절할 수 있습니다."
         alert.addButton(withTitle: "권한 설정 열기")
         alert.addButton(withTitle: "나중에").keyEquivalent = "\u{1b}"
-        NSApp.activate(ignoringOtherApps: true)
-        UserDefaults.standard.set(true, forKey: Self.didShowPermissionGuide)
-        if alert.runModal() == .alertFirstButtonReturn {
-            controller.requestAccessibilityPermission()
-        } else {
-            controller.permissionBannerDeferred = true
-        }
+        defaults.set(true, forKey: didShowPermissionGuide)
+        return alert
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {

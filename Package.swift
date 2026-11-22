@@ -38,6 +38,7 @@ let package = Package(
                 .linkedFramework("IOKit"),
                 .linkedFramework("ServiceManagement")
             ]
-        )
+        ),
+        .testTarget(name: "HaloTests", dependencies: ["halo"])
     ]
 )

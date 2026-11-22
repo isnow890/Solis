@@ -19,6 +19,9 @@ jobs:
             Sources/CDisplayBridge/CDisplayBridge.m \
             -o /dev/null
 
+      - name: Run regression tests
+        run: swift test
+
       - name: Build release binary
         run: swift build -c release
 

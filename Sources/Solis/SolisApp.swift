@@ -85,7 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let access = BrightnessKeyMonitor.Status()
         print("CLI preflight: AX=\(access.accessibility) PostEvent=\(access.postEvent)")
         print("Standard F1/F2 capture: \(BrightnessKeyMonitor.standardKeysDefault)")
-        let apps = NSRunningApplication.runningApplications(withBundleIdentifier: "com.mobb.Solis")
+        let apps = NSRunningApplication.runningApplications(withBundleIdentifier: "com.isnow890.solis")
             .filter { $0.processIdentifier != getpid() }
         if apps.isEmpty { print("GUI event tap: no running app") }
         for app in apps {

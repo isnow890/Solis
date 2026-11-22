@@ -345,7 +345,7 @@ final class DisplayController: ObservableObject {
                 continue
             }
             if channels[item.id] == nil {
-                let queue = portQueues[port] ?? DispatchQueue(label: "com.mobb.Solis.ddc." + port, qos: .userInitiated)
+                let queue = portQueues[port] ?? DispatchQueue(label: "com.isnow890.solis.ddc." + port, qos: .userInitiated)
                 portQueues[port] = queue
                 channels[item.id] = DDCChannel(id: item.id, uuid: item.uuidString, port: port, queue: queue)
             }

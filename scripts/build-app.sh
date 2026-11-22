@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="Solis"
-BUNDLE_ID="com.mobb.Solis"
+BUNDLE_ID="com.isnow890.solis"
 BUILD_DIR="$ROOT_DIR/build"
 OUTPUT="$BUILD_DIR/$APP_NAME.app"
 INSTALL_PATH="/Applications/$APP_NAME.app"

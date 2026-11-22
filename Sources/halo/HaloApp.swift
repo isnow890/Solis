@@ -6,6 +6,7 @@ import CDisplayBridge
 @main
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+    private static let didShowPermissionGuide = "halo.didShowPermissionGuide"
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
     private var controller: DisplayController?
@@ -56,9 +57,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         setupStatusItem()
         setupPopover(controller: controller)
+        DispatchQueue.main.async { [weak self] in self?.showInitialPermissionGuide() }
         updates.start()
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(spaceChanged(_:)),
             name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
+    }
+
+    private func showInitialPermissionGuide() {
+        guard let controller, !controller.isAccessibilityGranted, !controller.needsPermissionRelaunch,
+              !UserDefaults.standard.bool(forKey: Self.didShowPermissionGuide) else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "키보드로 화면 밝기를 조절할까요?"
+        alert.informativeText = BrightnessKeyMonitor.permissionExplanation
+            + "\n\n‘나중에’를 선택해도 메뉴 막대에서 밝기와 해상도를 조절할 수 있습니다."
+        alert.addButton(withTitle: "권한 설정 열기")
+        alert.addButton(withTitle: "나중에").keyEquivalent = "\u{1b}"
+        NSApp.activate(ignoringOtherApps: true)
+        UserDefaults.standard.set(true, forKey: Self.didShowPermissionGuide)
+        if alert.runModal() == .alertFirstButtonReturn {
+            controller.requestAccessibilityPermission()
+        } else {
+            controller.permissionBannerDeferred = true
+        }
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -432,7 +453,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         menu.addItem(.separator())
 
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.1"
         let versionItem = NSMenuItem(title: "halo \(version)", action: nil, keyEquivalent: "")
         versionItem.isEnabled = false
         menu.addItem(versionItem)

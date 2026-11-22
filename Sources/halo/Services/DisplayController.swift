@@ -23,6 +23,9 @@ final class DisplayController: ObservableObject {
 
     var isAccessibilityGranted: Bool { keyStatus.ready }
     @Published var permissionBannerDeferred = false
+    @Published private(set) var didRequestBrightnessPermission = UserDefaults.standard.bool(forKey: DefaultsKey.requestedPermission) {
+        didSet { UserDefaults.standard.set(didRequestBrightnessPermission, forKey: DefaultsKey.requestedPermission) }
+    }
     private var waitingForFirstConnection = false
     private var announcedKeyConnection = false
 
@@ -131,6 +134,7 @@ final class DisplayController: ObservableObject {
 
     private enum DefaultsKey {
         static let keyTargetMode = "halo.keyTargetMode"
+        static let requestedPermission = "halo.didRequestBrightnessPermission"
         static let cleanupVirtualOnQuit = "halo.cleanupVirtualOnQuit"
         static let backendPrefix = "halo.backend."
         static let softwareBrightnessPrefix = "halo.swBrightness."
@@ -163,7 +167,8 @@ final class DisplayController: ObservableObject {
         keyMonitor.onStatus = { [weak self] status in
             guard let self else { return }
             if !status.ready { self.waitingForFirstConnection = true }
-            if status.accessibility && self.permissionBannerDeferred { self.permissionBannerDeferred = false }
+            if status.ready && self.permissionBannerDeferred { self.permissionBannerDeferred = false }
+            if status.ready && self.didRequestBrightnessPermission { self.didRequestBrightnessPermission = false }
             self.keyStatus = status
             self.announceConnectionIfVisible()
         }
@@ -180,6 +185,7 @@ final class DisplayController: ObservableObject {
     }
 
     func requestAccessibilityPermission() {
+        didRequestBrightnessPermission = true
         BrightnessKeyMonitor.requestAccessibilityPermission()
         keyMonitor.beginFastPolling(duration: 60)
     }

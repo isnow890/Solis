@@ -73,14 +73,14 @@ open /Applications/halo.app
 Package a `.dmg`, `.zip`, and `SHA256SUMS.txt`:
 
 ```bash
-VERSION=0.1.0 ./scripts/package-dmg.sh
+VERSION=0.1.1 ./scripts/package-dmg.sh
 ```
 
 ---
 
 ## Permissions & Shortcuts
 
-Sliders, resolution switching, and virtual HiDPI work **without** any special permissions. To intercept global brightness keys, grant `halo` access in:
+On first launch, halo asks whether you want to use brightness keys while another app is active. It checks key events on your Mac to recognize brightness shortcuts. Choose **나중에** (Later) to use the menu bar sliders, resolution controls, and virtual HiDPI right away. To enable the shortcuts, choose **권한 설정 열기** (Open Permission Settings) and allow halo in System Settings.
 
 - **macOS 14–26**: `System Settings → Privacy & Security → Accessibility`
 - **macOS 27+**: `System Settings → Privacy & Security → Device Control and Data Access`

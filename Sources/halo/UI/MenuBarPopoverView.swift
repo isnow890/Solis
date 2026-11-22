@@ -206,7 +206,7 @@ struct MenuBarPopoverView: View {
         if controller.needsAdditionalPermission {
             return "키보드 이벤트 제어 권한 필요"
         }
-        return "키보드 밝기 키 권한 필요"
+        return controller.didRequestBrightnessPermission ? "키보드 밝기 키 권한 확인 중" : "키보드 밝기 키 권한 필요"
     }
 
     private var accessibilityHelp: String {
@@ -216,7 +216,10 @@ struct MenuBarPopoverView: View {
         if controller.needsAdditionalPermission {
             return "손쉬운 사용은 허용되었지만 키보드 이벤트 제어 권한이 아직 필요합니다. 설정에서 halo의 권한을 확인해 주세요."
         }
-        return "슬라이더와 해상도는 권한 없이도 바로 쓸 수 있습니다. 키보드 밝기 키만 권한이 필요합니다."
+        if controller.didRequestBrightnessPermission {
+            return "설정에서 halo를 허용하세요. 이미 켜져 있다면 기존 halo를 −로 제거한 뒤 +로 현재 앱을 추가하고 다시 허용하세요."
+        }
+        return BrightnessKeyMonitor.permissionExplanation
     }
 
     private var permissionSettingsHint: String {
@@ -254,7 +257,7 @@ struct MenuBarPopoverView: View {
                     Button("앱 재시작", action: controller.relaunchApp)
                         .buttonStyle(.borderedProminent)
                     Button("설정 열기", action: controller.requestAccessibilityPermission)
-                } else if controller.needsAdditionalPermission {
+                } else if controller.needsAdditionalPermission || controller.didRequestBrightnessPermission {
                     Button("설정 열기", action: controller.requestAccessibilityPermission)
                         .buttonStyle(.borderedProminent)
                     Button("나중에") { controller.permissionBannerDeferred = true }

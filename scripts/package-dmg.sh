@@ -9,7 +9,7 @@ bundle_version=""
 if [[ -f "$APP_BUNDLE/Contents/Info.plist" ]]; then
   bundle_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_BUNDLE/Contents/Info.plist")
 fi
-VERSION="${VERSION:-${bundle_version:-0.1.0}}"
+VERSION="${VERSION:-${bundle_version:-0.1.1}}"
 ARCH="$(uname -m)"
 
 if [[ "$VERSION" != "$bundle_version" ]]; then

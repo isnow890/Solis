@@ -2,56 +2,124 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version (e.g. 0.1.0)"
+        description: "Existing release tag version (e.g. 0.1.0)"
         required: true
         default: "0.1.0"
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ inputs.version && format('v{0}', inputs.version) || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: macos-15
+    env:
+      NOTARY_PROFILE: halo-notary
+      TEAM_ID: UF272HL6P5
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Resolve version
-        id: meta
+      - name: Resolve release tag
         env:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            TAG="${GITHUB_REF_NAME}"
-            VER="${TAG#v}"
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            version=${GITHUB_REF_NAME#v}
           else
-            VER="${INPUT_VERSION}"
-            TAG="v${VER}"
+            version=$INPUT_VERSION
           fi
-          echo "version=${VER}" >> "$GITHUB_OUTPUT"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          [[ "$version" =~ ^(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*)){0,2}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
+          echo "VERSION=$version" >> "$GITHUB_ENV"
 
-      - name: Build & Package halo.app
+      - name: Check out the tagged app source
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/v${{ env.VERSION }}
+          path: release-source
+          persist-credentials: false
+
+      - name: Configure signing and notarization
         env:
-          CODESIGN_IDENTITY: "-"
-          VERSION: ${{ steps.meta.outputs.version }}
+          CERTIFICATE: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          API_KEY: ${{ secrets.ASC_API_KEY_P8 }}
+          KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
         run: |
-          chmod +x scripts/build-app.sh scripts/package-dmg.sh
+          set -euo pipefail
+          : "${CERTIFICATE:?Missing DEVELOPER_ID_P12_BASE64}" "${CERTIFICATE_PASSWORD:?Missing DEVELOPER_ID_P12_PASSWORD}"
+          : "${API_KEY:?Missing ASC_API_KEY_P8}" "${KEY_ID:?Missing ASC_KEY_ID}" "${ISSUER_ID:?Missing ASC_ISSUER_ID}"
+          umask 077
+          keychain="$RUNNER_TEMP/halo-signing.keychain-db"
+          cert="$RUNNER_TEMP/halo.p12"
+          api="$RUNNER_TEMP/halo.p8"
+          trap 'rm -f "$cert" "$api"' EXIT
+          password=$(openssl rand -hex 32)
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          printf '%s' "$CERTIFICATE" | base64 -D > "$cert"
+          security import "$cert" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
+          identity=$(security find-identity -v -p codesigning "$keychain" | awk -v team="($TEAM_ID)\"" '/"Developer ID Application:/ && index($0, team) {print $2}')
+          [[ "$identity" =~ ^[[:xdigit:]]{40}$ ]] || { echo "Expected one Developer ID Application identity for $TEAM_ID"; exit 1; }
+          printf '%s\n' "$API_KEY" > "$api"
+          xcrun notarytool store-credentials "$NOTARY_PROFILE" --keychain "$keychain" --key "$api" --key-id "$KEY_ID" --issuer "$ISSUER_ID"
+          echo "CODESIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+          echo "NOTARY_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+      - name: Sign, notarize and verify release artifacts
+        run: |
+          cp scripts/{build-app,package-dmg,notarize}.sh release-source/scripts/
+          cd release-source
           ./scripts/build-app.sh
           ./scripts/package-dmg.sh
+          cd build
+          shasum -a 256 -c SHA256SUMS.txt
+          ditto -x -k "halo-v$VERSION-arm64.zip" "$RUNNER_TEMP/halo-zip"
+          xcrun stapler validate "$RUNNER_TEMP/halo-zip/halo.app"
+          spctl --assess --type execute "$RUNNER_TEMP/halo-zip/halo.app"
 
-      - name: Publish GitHub Release
+      - name: Publish verified artifacts
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.meta.outputs.tag }}
-          name: halo ${{ steps.meta.outputs.tag }}
+          tag_name: v${{ env.VERSION }}
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
-            build/halo-v${{ steps.meta.outputs.version }}-*.dmg
-            build/halo-v${{ steps.meta.outputs.version }}-*.zip
-            build/SHA256SUMS.txt
+            release-source/build/halo-v${{ env.VERSION }}-arm64.dmg
+            release-source/build/halo-v${{ env.VERSION }}-arm64.zip
+            release-source/build/SHA256SUMS.txt
+
+      - name: Update first-launch instructions for v0.1.0
+        if: env.VERSION == '0.1.0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="$RUNNER_TEMP/halo-release.md"
+          gh release view v0.1.0 --json body --jq .body > "$notes"
+          if rg -q '^## First Launch \(Ad-Hoc Signed Build\)' "$notes"; then
+            python3 - "$notes" <<'PY'
+          import pathlib, re, sys
+          path = pathlib.Path(sys.argv[1])
+          notes = re.sub(r'^## First Launch \(Ad-Hoc Signed Build\).*?^\x60\x60\x60[ \t]*$',
+                         '## First Launch\n\nDrag the notarized halo.app to /Applications and open it.',
+                         path.read_text(), count=1, flags=re.M | re.S)
+          path.write_text(notes)
+          PY
+            gh release edit v0.1.0 --notes-file "$notes"
+          fi
+
+      - name: Clean up signing keychain
+        if: always()
+        run: |
+          keychain="$RUNNER_TEMP/halo-signing.keychain-db"
+          if [[ -f "$keychain" ]]; then security delete-keychain "$keychain"; fi

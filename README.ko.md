@@ -55,11 +55,7 @@
 
 1. [Releases](https://github.com/isnow890/halo/releases) 페이지에서 `halo-vX.Y.Z-arm64.dmg` (또는 `.zip`)를 다운로드합니다.
 2. **halo.app**을 `/Applications` 폴더로 드래그합니다.
-3. GitHub Releases 배포본은 **ad-hoc 서명(비공증)** 빌드입니다. 최초 실행 전 터미널에서 격리 속성을 한 번 해제해 주세요:
-   ```bash
-   xattr -cr /Applications/halo.app
-   open /Applications/halo.app
-   ```
+3. 응용 프로그램에서 **halo.app**을 엽니다. 이전에 받은 파일의 릴리즈 설명에 *Ad-Hoc Signed Build*라고 적혀 있으면 해당 릴리즈의 최초 실행 안내를 따르세요.
 
 ### 방법 2: 소스에서 직접 빌드
 
@@ -111,7 +107,7 @@ VERSION=0.1.0 ./scripts/package-dmg.sh
 ## 개인정보, 서명 및 알려진 한계
 
 1. **업데이트 자동 확인 안내 (설정에서 해제 가능)**: *업데이트 자동 확인*이 켜져 있으면 하루 1회 `https://api.github.com/repos/isnow890/halo/releases/latest`에서 최신 버전 태그 번호만 조회합니다. 개인정보나 사용량 텔레메트리는 일절 수집하지 않으며, 설정에서 끌 수 있습니다.
-2. **ad-hoc 서명 및 업데이트 후 권한 재허용**: GitHub Releases 사전 빌드 파일은 ad-hoc 서명(`CODESIGN_IDENTITY="-"`)으로 배포됩니다. macOS는 코드 서명 기준으로 권한을 기억하므로 **새 릴리즈로 덮어쓴 뒤에는 개인정보 보호 및 보안에서 기존 `halo` 항목을 `(−)`로 삭제 후 다시 허용**해야 할 수 있습니다. 로컬에서 본인의 Apple Development 인증서로 빌드하면 재빌드 시에도 권한이 유지됩니다.
+2. **업데이트 후 권한**. ad-hoc 빌드에서 Developer ID 서명 빌드로 바꾸면 macOS가 손쉬운 사용 또는 기기 제어 권한을 다시 요청할 수 있습니다.
 3. **비공개 macOS API 사용**: `DisplayServices`, `IOAVService`, `CGVirtualDisplay`를 사용합니다. 향후 macOS 업데이트로 심볼이 변경될 수 있으며, `halo`는 동적 로딩으로 미지원 시 안전하게 폴백합니다.
 4. **Mac App Store 미지원**: 전역 `CGEventTap` 및 `IOAVService` DDC/CI는 App Sandbox 정책과 양립할 수 없어 GitHub Releases로만 배포합니다.
 5. **모니터·어댑터별 DDC 호환성**: DDC/CI 지원 여부는 모니터·허브·케이블 조합마다 다릅니다. DisplayLink 어댑터 경유 모니터는 하드웨어 DDC가 불가능하므로 자동으로 소프트웨어 오버레이/감마 디밍을 사용합니다.
@@ -120,7 +116,7 @@ VERSION=0.1.0 ./scripts/package-dmg.sh
 <details>
 <summary><strong>문제 해결 / FAQ</strong></summary>
 
-- **"halo이(가) 손상되어 열 수 없습니다" 경고가 뜰 때**: 비공증(ad-hoc) 빌드 격리 속성 때문이며, `xattr -cr /Applications/halo.app`을 한 번 실행하면 정상 실행됩니다.
+- **macOS가 halo 파일이 손상됐다고 표시하면** DMG를 다시 받고 SHA-256을 같은 릴리즈의 체크섬과 비교하세요.
 - **권한을 켰는데도 키보드 밝기 키가 안 먹을 때**: ad-hoc 빌드 교체 후 macOS가 이전 서명 항목을 캐시할 수 있습니다. 설정에서 기존 `halo`를 선택해 `(−)`로 삭제한 뒤 앱을 재시작하고 다시 허용해 주세요.
 - **외장 모니터가 소프트웨어 디밍(`SW`)으로만 표시될 때**: 모니터 자체 OSD 메뉴에서 DDC/CI가 켜져 있는지 확인하세요. DisplayLink 독이나 일부 HDMI/USB-C 어댑터는 DDC 신호를 차단합니다. `/Applications/halo.app/Contents/MacOS/halo --diagnose`로 정확한 상태를 확인할 수 있습니다.
 

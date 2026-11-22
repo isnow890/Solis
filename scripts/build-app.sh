@@ -96,14 +96,15 @@ if [[ -z "$SIGN_IDENTITY" ]]; then
   fi
   SIGN_IDENTITY="$candidates"
 fi
-if [[ -n "${NOTARY_PROFILE:-}" ]]; then
+if [[ -n "${NOTARY_PROFILE:-}" || "$SIGN_IDENTITY" == "Developer ID Application:"* ]]; then
   codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
-  ditto -c -k --keepParent "$APP_BUNDLE" "$stage/submission.zip"
-  xcrun notarytool submit "$stage/submission.zip" --keychain-profile "$NOTARY_PROFILE" --wait
-  xcrun stapler staple "$APP_BUNDLE"
-  spctl --assess --type execute "$APP_BUNDLE"
 else
   codesign --force --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
+fi
+if [[ -n "${NOTARY_PROFILE:-}" ]]; then
+  ditto -c -k --keepParent "$APP_BUNDLE" "$stage/submission.zip"
+  "$ROOT_DIR/scripts/notarize.sh" "$stage/submission.zip" "$APP_BUNDLE"
+  spctl --assess --type execute "$APP_BUNDLE"
 fi
 codesign --verify --strict "$APP_BUNDLE"
 

@@ -55,11 +55,7 @@
 
 1. Download `halo-vX.Y.Z-arm64.dmg` (or `.zip`) from [Releases](https://github.com/isnow890/halo/releases).
 2. Drag **halo.app** into `/Applications`.
-3. Prebuilt releases are **ad-hoc signed (unnotarized)**. Clear macOS quarantine once before first launch:
-   ```bash
-   xattr -cr /Applications/halo.app
-   open /Applications/halo.app
-   ```
+3. Open **halo.app** from Applications. For an older download labeled *Ad-Hoc Signed Build*, see the first-launch instructions on its release page.
 
 ### Option 2: Build from Source
 
@@ -111,7 +107,7 @@ Inspect connected displays, Apple Silicon DDC/CI probe status, event tap permiss
 ## Privacy, Signing & Honest Notes
 
 1. **Daily Update Check (Opt-Out)**: When *"Check for updates automatically"* is on, `halo` sends one unauthenticated `GET` request per day to `https://api.github.com/repos/isnow890/halo/releases/latest` to compare the latest version tag. No analytics, telemetry, or personal data are collected, and you can disable it anytime in Settings.
-2. **Ad-Hoc Signing & Permission Re-Grant on Updates**: Prebuilt GitHub Release binaries are ad-hoc signed (`CODESIGN_IDENTITY="-"`). Because macOS ties Accessibility / Device Control permissions to an app's code signature, **you will need to remove and re-grant `halo` in Privacy & Security after updating** to a new prebuilt release. Building locally with your own Apple Development certificate preserves permissions across rebuilds.
+2. **Permissions after an update**. When switching from an ad-hoc build to a Developer ID build, macOS may ask for Accessibility or Device Control permission again.
 3. **Private macOS APIs**: Uses `DisplayServices`, `IOAVService`, and `CGVirtualDisplay` (the same underlying frameworks used by MonitorControl and BetterDisplay). All private symbols are loaded dynamically and degrade safely if a future macOS update changes them.
 4. **Not on the Mac App Store**: Global `CGEventTap` and `IOAVService` DDC/CI are incompatible with App Sandbox.
 5. **Hardware Variance**: DDC/CI depends on monitor firmware, hubs, and cables. DisplayLink adapters do not expose Apple Silicon `IOAVService` DDC/CI, so `halo` automatically falls back to Software Overlay / Gamma dimming.
@@ -120,7 +116,7 @@ Inspect connected displays, Apple Silicon DDC/CI probe status, event tap permiss
 <details>
 <summary><strong>Troubleshooting / FAQ</strong></summary>
 
-- **"halo is damaged and can't be opened"**: Run `xattr -cr /Applications/halo.app` once to remove the macOS download quarantine attribute from the ad-hoc release build.
+- **If macOS reports that halo is damaged**, download the DMG again and compare its SHA-256 with the checksum on the same release page.
 - **Brightness keys don't respond even though `halo` is toggled on in Settings**: macOS sometimes retains a stale TCC entry after replacing an ad-hoc signed app. Select `halo` in Privacy & Security, click `−` to remove it, relaunch `halo`, and grant permission again.
 - **External monitor only shows Software Dimming (`SW`)**: Verify DDC/CI is enabled in the monitor's own OSD menu. DisplayLink docks and some HDMI/USB-C adapters block I2C/DDC packets; run `/Applications/halo.app/Contents/MacOS/halo --diagnose` to see the exact probe result.
 

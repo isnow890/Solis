@@ -19,34 +19,43 @@ fi
 
 DMG_NAME="${APP_NAME}-v${VERSION}-${ARCH}.dmg"
 ZIP_NAME="${APP_NAME}-v${VERSION}-${ARCH}.zip"
-DMG_PATH="$BUILD_DIR/$DMG_NAME"
-ZIP_PATH="$BUILD_DIR/$ZIP_NAME"
-SHA_PATH="$BUILD_DIR/SHA256SUMS.txt"
-
 STAGE_DIR="$(mktemp -d "$BUILD_DIR/.dmg-stage.XXXXXX")"
 trap 'rm -rf "$STAGE_DIR"' EXIT
 
+DMG_PATH="$STAGE_DIR/$DMG_NAME"
+ZIP_PATH="$STAGE_DIR/$ZIP_NAME"
+if [[ -n "${NOTARY_PROFILE:-}" ]]; then
+  : "${CODESIGN_IDENTITY:?Set a Developer ID Application identity}"
+  xcrun stapler validate "$APP_BUNDLE"
+  spctl --assess --type execute "$APP_BUNDLE"
+fi
 echo "==> Preparing DMG staging directory..."
-ditto "$APP_BUNDLE" "$STAGE_DIR/$APP_NAME.app"
-ln -s /Applications "$STAGE_DIR/Applications"
+mkdir "$STAGE_DIR/volume"
+ditto "$APP_BUNDLE" "$STAGE_DIR/volume/$APP_NAME.app"
+ln -s /Applications "$STAGE_DIR/volume/Applications"
 
 echo "==> Creating $DMG_PATH..."
-rm -f "$DMG_PATH" "$ZIP_PATH"
 hdiutil create \
   -volname "$APP_NAME" \
-  -srcfolder "$STAGE_DIR" \
+  -srcfolder "$STAGE_DIR/volume" \
   -ov \
   -format UDZO \
   "$DMG_PATH"
 
+if [[ -n "${NOTARY_PROFILE:-}" ]]; then
+  codesign --force --timestamp --identifier com.isnow890.halo.dmg --sign "$CODESIGN_IDENTITY" "$DMG_PATH"
+  codesign --verify --strict "$DMG_PATH"
+  "$ROOT_DIR/scripts/notarize.sh" "$DMG_PATH" "$DMG_PATH"
+  spctl --assess --type open --context context:primary-signature "$DMG_PATH"
+fi
+
 echo "==> Creating $ZIP_PATH..."
 ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE" "$ZIP_PATH"
 
-echo "==> Writing checksums to $SHA_PATH..."
 (
-  cd "$BUILD_DIR"
-  shasum -a 256 "$DMG_NAME" "$ZIP_NAME" > "$SHA_PATH"
+  cd "$STAGE_DIR"
+  shasum -a 256 "$DMG_NAME" "$ZIP_NAME" > SHA256SUMS.txt
+  mv "$DMG_NAME" "$ZIP_NAME" SHA256SUMS.txt "$BUILD_DIR/"
 )
-
-cat "$SHA_PATH"
+cat "$BUILD_DIR/SHA256SUMS.txt"
 echo "==> Release artifacts ready in $BUILD_DIR"

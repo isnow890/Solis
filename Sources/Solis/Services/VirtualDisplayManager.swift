@@ -1,0 +1,334 @@
+import Foundation
+import CoreGraphics
+import CDisplayBridge
+
+@MainActor
+final class VirtualDisplayManager {
+    private struct ActiveRecord {
+        let id: UUID
+        let handle: LDVirtualDisplayHandle
+        let name: String
+        let maxWidth: Int
+        let maxHeight: Int
+        var mirroredPhysicalDisplayID: CGDirectDisplayID?
+        var mirroredPhysicalDisplayName: String?
+    }
+
+    private var records: [UUID: ActiveRecord] = [:]
+    private struct MirrorRequest {
+        let physicalUUID: String
+        let previousMaster: CGDirectDisplayID
+        let previousMasterUUID: String?
+        var committed = false
+        var completion: ((Bool) -> Void)?
+    }
+
+    private var mirrors: [UUID: MirrorRequest] = [:]
+    private var pending: [UUID: DispatchWorkItem] = [:]
+    private var nextSerial: UInt32 = 1001
+
+    var isSupported: Bool {
+        LDVirtualDisplayHandle.isSupported()
+    }
+
+    var activeVirtualDisplays: [ManagedVirtualDisplayInfo] {
+        records.values
+            .sorted { $0.name < $1.name }
+            .map {
+                ManagedVirtualDisplayInfo(
+                    id: $0.id,
+                    displayID: $0.handle.displayID,
+                    name: $0.name,
+                    maxWidth: $0.maxWidth,
+                    maxHeight: $0.maxHeight,
+                    mirroredPhysicalDisplayID: $0.mirroredPhysicalDisplayID,
+                    mirroredPhysicalDisplayName: $0.mirroredPhysicalDisplayName
+                )
+            }
+    }
+
+    func virtualDisplayIDSet() -> Set<CGDirectDisplayID> {
+        Set(records.values.map { $0.handle.displayID })
+    }
+
+    func mirrorRecord(forPhysicalDisplayID physicalID: CGDirectDisplayID) -> ManagedVirtualDisplayInfo? {
+        activeVirtualDisplays.first { $0.mirroredPhysicalDisplayID == physicalID }
+    }
+
+    /// Creates a standalone HiDPI virtual display from a preset.
+    @discardableResult
+    func createVirtualDisplay(
+        name: String,
+        preset: VirtualDisplayPreset,
+        onChange: @escaping () -> Void
+    ) -> ManagedVirtualDisplayInfo? {
+        let maxPx = preset.maxPixels
+        let modeSpecs = preset.logicalModes.map {
+            LDVirtualDisplayModeSpec(width: UInt($0.width), height: UInt($0.height), refreshRate: $0.hz)
+        }
+        return createVirtualDisplay(
+            name: name,
+            maxWidth: maxPx.width,
+            maxHeight: maxPx.height,
+            sizeInMM: preset.sizeInMM,
+            modeSpecs: modeSpecs,
+            mirroredPhysicalID: nil,
+            mirroredPhysicalName: nil,
+            onChange: onChange
+        )
+    }
+
+    /// Creates a HiDPI virtual display tailored to a physical display's aspect ratio & orientation,
+    /// then mirrors the physical display onto it so macOS renders crisp 2x HiDPI.
+    func enableHiDPIMirror(
+        for physicalDisplay: DisplayItem,
+        onComplete: @escaping (Bool) -> Void
+    ) {
+        // Avoid duplicating if already active
+        if let record = mirrorRecord(forPhysicalDisplayID: physicalDisplay.id) {
+            onComplete(!isPending(record.id) && CGDisplayMirrorsDisplay(physicalDisplay.id) == record.displayID)
+            return
+        }
+
+        let isPortrait = physicalDisplay.isPortrait
+        let physicalID = physicalDisplay.id
+        guard let identity = DisplayTopology.uuid(physicalID), identity == physicalDisplay.uuidString,
+              let online = DisplayTopology.onlineIDs(), online.contains(physicalID),
+              !online.contains(where: { CGDisplayMirrorsDisplay($0) == physicalID }),
+              physicalDisplay.logicalWidth > 0, physicalDisplay.logicalHeight > 0 else {
+            onComplete(false)
+            return
+        }
+        let previous = CGDisplayMirrorsDisplay(physicalID)
+        let previousUUID = previous == 0 ? nil : DisplayTopology.uuid(previous)
+        guard previous == 0 || previousUUID != nil else { onComplete(false); return }
+        let width = Double(physicalDisplay.logicalWidth)
+        let height = Double(physicalDisplay.logicalHeight)
+        let fit = min(1, (isPortrait ? 1440 : 2560) / width, (isPortrait ? 2560 : 1440) / height)
+        let baseW = max(1, Int(width * fit))
+        let baseH = max(1, Int(height * fit))
+        let hz = physicalDisplay.refreshRate > 0 ? physicalDisplay.refreshRate : 60
+
+        // Target 2x backing canvas (capped at 5120 to stay well within GPU limits)
+        let maxWidth = min(baseW * 2, isPortrait ? 2880 : 5120)
+        let maxHeight = min(baseH * 2, isPortrait ? 5120 : 2880)
+
+        let aspect = Double(baseW) / Double(baseH)
+        let logicalModes = buildMatchedLogicalModes(
+            baseWidth: baseW,
+            baseHeight: baseH,
+            aspect: aspect,
+            hz: hz
+        )
+
+        let modeSpecs = logicalModes.map {
+            LDVirtualDisplayModeSpec(width: UInt($0.0), height: UInt($0.1), refreshRate: $0.2)
+        }
+
+        let sizeInMM = isPortrait ? CGSize(width: 340, height: 600) : CGSize(width: 600, height: 340)
+        let name = "\(physicalDisplay.name) HiDPI"
+
+        guard let created = createVirtualDisplay(
+            name: name,
+            maxWidth: maxWidth,
+            maxHeight: maxHeight,
+            sizeInMM: sizeInMM,
+            modeSpecs: modeSpecs,
+            mirroredPhysicalID: physicalDisplay.id,
+            mirroredPhysicalName: physicalDisplay.name,
+            onChange: {}
+        ) else {
+            onComplete(false)
+            return
+        }
+
+        mirrors[created.id] = MirrorRequest(physicalUUID: identity, previousMaster: previous,
+                                            previousMasterUUID: previousUUID, completion: onComplete)
+        awaitMirror(id: created.id, modes: modeSpecs, attempts: 20)
+    }
+
+    private func awaitMirror(id: UUID, modes: [LDVirtualDisplayModeSpec], attempts: Int) {
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, let record = self.records[id], let physical = record.mirroredPhysicalDisplayID,
+                  var request = self.mirrors[id] else { return }
+            let virtual = record.handle.displayID
+            guard DisplayTopology.uuid(physical) == request.physicalUUID, CGDisplayIsOnline(physical) != 0 else {
+                self.failMirror(id)
+                return
+            }
+            if CGDisplayIsOnline(virtual) != 0 && !request.committed,
+               self.prepareVirtualMode(for: virtual, matching: modes) {
+                guard CGDisplayMirrorsDisplay(physical) == request.previousMaster,
+                      request.previousMaster == 0 || DisplayTopology.uuid(request.previousMaster) == request.previousMasterUUID,
+                      LDMirrorDisplay(physical, virtual) else {
+                    self.failMirror(id)
+                    return
+                }
+                request.committed = true
+                self.mirrors[id] = request
+            }
+            if request.committed, CGDisplayMirrorsDisplay(physical) == virtual,
+               let actual = CGDisplayCopyDisplayMode(virtual),
+               self.matches(actual, specs: modes) {
+                self.pending.removeValue(forKey: id)
+                self.finishMirror(id, success: true)
+            } else if attempts > 1 {
+                self.awaitMirror(id: id, modes: modes, attempts: attempts - 1)
+            } else {
+                self.failMirror(id)
+            }
+        }
+        pending[id] = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
+    }
+
+    private func finishMirror(_ id: UUID, success: Bool) {
+        let completion = mirrors[id]?.completion
+        mirrors[id]?.completion = nil
+        completion?(success)
+    }
+
+    private func failMirror(_ id: UUID) {
+        finishMirror(id, success: false)
+        _ = removeVirtualDisplay(id: id)
+    }
+
+    private func matches(_ mode: CGDisplayMode, specs: [LDVirtualDisplayModeSpec]) -> Bool {
+        mode.pixelWidth == 2 * mode.width && mode.pixelHeight == 2 * mode.height &&
+            specs.contains { $0.width == mode.width && $0.height == mode.height &&
+                abs($0.refreshRate - mode.refreshRate) < 0.01 }
+    }
+
+    private func prepareVirtualMode(for id: CGDirectDisplayID, matching specs: [LDVirtualDisplayModeSpec]) -> Bool {
+        if let current = CGDisplayCopyDisplayMode(id), matches(current, specs: specs) { return true }
+        let options = [kCGDisplayShowDuplicateLowResolutionModes: true] as CFDictionary
+        guard let modes = CGDisplayCopyAllDisplayModes(id, options) as? [CGDisplayMode] else { return false }
+        for spec in specs {
+            if let mode = modes.first(where: { matches($0, specs: [spec]) }) {
+                return CGDisplaySetDisplayMode(id, mode, nil) == .success
+            }
+        }
+        return false
+    }
+
+    func isPending(_ id: UUID) -> Bool { pending[id] != nil }
+
+    @discardableResult
+    func removeVirtualDisplay(id: UUID) -> Bool {
+        guard let record = records[id] else { return true }
+        pending.removeValue(forKey: id)?.cancel()
+        if let request = mirrors[id], request.committed, let physical = record.mirroredPhysicalDisplayID,
+           DisplayTopology.uuid(physical) == request.physicalUUID,
+           CGDisplayMirrorsDisplay(physical) == record.handle.displayID {
+            let restore = request.previousMasterUUID.flatMap { uuid in
+                DisplayTopology.onlineIDs()?.first { DisplayTopology.uuid($0) == uuid }
+            } ?? kCGNullDirectDisplay
+            guard LDMirrorDisplay(physical, restore) else { return false }
+        }
+        mirrors.removeValue(forKey: id)
+        records.removeValue(forKey: id)
+        record.handle.invalidate()
+        return true
+    }
+
+    func cancelPending() {
+        for id in Array(pending.keys) { removeVirtualDisplay(id: id) }
+    }
+
+    func removeAll() {
+        for id in Array(records.keys) where !removeVirtualDisplay(id: id) {
+            NSLog("Solis: 가상 화면 미러 관계 복원 실패 %@", id.uuidString)
+        }
+    }
+
+    // MARK: - Internal Helpers
+
+    private func createVirtualDisplay(
+        name: String,
+        maxWidth: Int,
+        maxHeight: Int,
+        sizeInMM: CGSize,
+        modeSpecs: [LDVirtualDisplayModeSpec],
+        mirroredPhysicalID: CGDirectDisplayID?,
+        mirroredPhysicalName: String?,
+        onChange: @escaping () -> Void
+    ) -> ManagedVirtualDisplayInfo? {
+        let id = UUID()
+        let serial = nextSerial
+        nextSerial += 1
+
+        guard let handle = LDVirtualDisplayHandle(
+            name: name,
+            maxWidth: UInt(maxWidth),
+            maxHeight: UInt(maxHeight),
+            sizeInMillimeters: sizeInMM,
+            modes: modeSpecs,
+            hiDPI: true,
+            serialNumber: serial,
+            terminationHandler: { [weak self] in
+                Task { @MainActor in
+                    self?.finishMirror(id, success: false)
+                    self?.pending.removeValue(forKey: id)?.cancel()
+                    self?.mirrors.removeValue(forKey: id)
+                    self?.records.removeValue(forKey: id)
+                    onChange()
+                }
+            }
+        ) else {
+            return nil
+        }
+
+        let record = ActiveRecord(
+            id: id,
+            handle: handle,
+            name: name,
+            maxWidth: maxWidth,
+            maxHeight: maxHeight,
+            mirroredPhysicalDisplayID: mirroredPhysicalID,
+            mirroredPhysicalDisplayName: mirroredPhysicalName
+        )
+        records[id] = record
+
+        return ManagedVirtualDisplayInfo(
+            id: id,
+            displayID: handle.displayID,
+            name: name,
+            maxWidth: maxWidth,
+            maxHeight: maxHeight,
+            mirroredPhysicalDisplayID: mirroredPhysicalID,
+            mirroredPhysicalDisplayName: mirroredPhysicalName
+        )
+    }
+
+    private func buildMatchedLogicalModes(
+        baseWidth: Int,
+        baseHeight: Int,
+        aspect: Double,
+        hz: Double
+    ) -> [(Int, Int, Double)] {
+        var candidates: [(Int, Int)] = [(baseWidth, baseHeight)]
+
+        // Provide crisp stepped logical HiDPI sizes matching the physical display aspect ratio
+        let scales: [Double] = [0.9, 0.85, 0.8, 0.75, 0.67]
+        for s in scales {
+            let w = (Int((Double(baseWidth) * s).rounded()) / 2) * 2
+            let h = (Int((Double(w) / aspect).rounded()) / 2) * 2
+            if w >= 640 && h >= 480 {
+                candidates.append((w, h))
+            }
+        }
+
+        var seen = Set<String>()
+        var result: [(Int, Int, Double)] = []
+        for (w, h) in candidates {
+            let key = "\(w)x\(h)"
+            if seen.insert(key).inserted {
+                result.append((w, h, hz))
+                if abs(hz - 60.0) > 1.0 {
+                    result.append((w, h, 60.0))
+                }
+            }
+        }
+        return result
+    }
+}

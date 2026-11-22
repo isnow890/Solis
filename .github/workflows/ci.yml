@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Static analyze CDisplayBridge
+        run: |
+          clang --analyze -fobjc-arc \
+            -ISources/CDisplayBridge/include \
+            Sources/CDisplayBridge/CDisplayBridge.m \
+            -o /dev/null
+
+      - name: Build release binary
+        run: swift build -c release
+
+      - name: Package ad-hoc app bundle
+        env:
+          CODESIGN_IDENTITY: "-"
+        run: ./scripts/build-app.sh

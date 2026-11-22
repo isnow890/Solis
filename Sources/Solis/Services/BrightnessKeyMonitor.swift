@@ -1,0 +1,163 @@
+import AppKit
+import ApplicationServices
+
+final class BrightnessKeyMonitor {
+    enum StepDirection { case up, down }
+    struct Status: Equatable {
+        var accessibility = AXIsProcessTrusted()
+        var postEvent = CGPreflightPostEventAccess()
+        var enabled = false
+        var mask: CGEventMask = 0
+        var ready: Bool { enabled && mask & requiredMask == requiredMask }
+    }
+
+    static let requiredMask: CGEventMask = (1 << 14) | (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
+    static let standardKeysPreference = "Solis.captureStandardFunctionKeys"
+    static var standardKeysDefault: Bool {
+        let defaults = UserDefaults.standard
+        if let value = defaults.object(forKey: standardKeysPreference) as? Bool { return value }
+        return defaults.bool(forKey: "com.apple.keyboard.fnState")
+    }
+
+    var captureStandardKeys = standardKeysDefault
+    var onBrightnessStep: ((StepDirection, Bool, CGDirectDisplayID?) -> Void)?
+    var onStatus: ((Status) -> Void)?
+    private var tap: CFMachPort?
+    private var source: CFRunLoopSource?
+    private var poll: Timer?
+    private var retryInterval = 1.5
+    private var consumed = [Int64: StepDirection]()
+
+    /// Inspect only. In CLI mode a running app's tap and the CLI process's TCC preflight are separate observations.
+    static func tapInfo(pid: pid_t) -> CGEventTapInformation? {
+        var count: UInt32 = 0
+        guard CGGetEventTapList(0, nil, &count) == .success, count > 0 else { return nil }
+        var list = [CGEventTapInformation](repeating: .init(), count: Int(count))
+        guard CGGetEventTapList(count, &list, &count) == .success else { return nil }
+        return list.prefix(Int(count)).first {
+            $0.tappingProcess == pid && $0.tapPoint == .cgSessionEventTap &&
+            $0.options == .defaultTap && $0.eventsOfInterest != 0 &&
+            $0.eventsOfInterest & ~requiredMask == 0
+        }
+    }
+
+    static func requestAccessibilityPermission() {
+        let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+        _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
+        if !CGPreflightPostEventAccess() { CGRequestPostEventAccess() }
+    }
+
+    static func openAccessibilitySettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    func refresh() {
+        poll?.invalidate()
+        var status = currentStatus()
+        if !status.ready {
+            removeTap()
+            installTap()
+            status = currentStatus()
+        }
+        onStatus?(status)
+        let interval = status.ready ? 15 : retryInterval
+        retryInterval = status.ready ? 1.5 : min(30, retryInterval * 2)
+        let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in self?.refresh() }
+        RunLoop.main.add(timer, forMode: .common)
+        poll = timer
+    }
+
+    private func currentStatus() -> Status {
+        var status = Status()
+        if let tap, let info = Self.tapInfo(pid: getpid()) {
+            status.enabled = CGEvent.tapIsEnabled(tap: tap) && info.enabled
+            status.mask = info.eventsOfInterest
+        }
+        return status
+    }
+
+    private func installTap() {
+        guard let port = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
+            options: .defaultTap, eventsOfInterest: Self.requiredMask, callback: { _, type, event, context in
+                guard let context else { return Unmanaged.passUnretained(event) }
+                return Unmanaged<BrightnessKeyMonitor>.fromOpaque(context).takeUnretainedValue()
+                    .handleEvent(type: type, event: event)
+            }, userInfo: Unmanaged.passUnretained(self).toOpaque()) else { return }
+        let runSource = CFMachPortCreateRunLoopSource(nil, port, 0)
+        tap = port
+        source = runSource
+        CFRunLoopAddSource(CFRunLoopGetMain(), runSource, .commonModes)
+        CGEvent.tapEnable(tap: port, enable: true)
+    }
+
+    private func removeTap() {
+        if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
+        if let tap { CFMachPortInvalidate(tap) }
+        source = nil
+        tap = nil
+        consumed.removeAll()
+    }
+
+    func stop() {
+        poll?.invalidate()
+        poll = nil
+        removeTap()
+    }
+
+    func handleEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        let pass = Unmanaged.passUnretained(event)
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            consumed.removeAll()
+            if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.poll != nil else { return }
+                self.refresh()
+            }
+            return pass
+        }
+        let flags = event.flags
+        let fine = flags.contains([.maskAlternate, .maskShift])
+        if type.rawValue == 14, let nx = NSEvent(cgEvent: event), nx.subtype.rawValue == 8 {
+            let code = (nx.data1 >> 16) & 0xffff
+            guard code == 2 || code == 3 else { return pass }
+            if (nx.data1 >> 8) & 0xff == 0x0a {
+                emit(code == 2 ? .up : .down, fine: fine)
+            }
+            return nil
+        }
+
+        let code = event.getIntegerValueField(.keyboardEventKeycode)
+        if type == .keyUp { return consumed.removeValue(forKey: code) == nil ? pass : nil }
+        guard type == .keyDown else { return pass }
+        let direction: StepDirection
+        if let held = consumed[code] {
+            direction = held
+        } else if flags.contains([.maskControl, .maskAlternate]), !flags.contains(.maskCommand),
+                  code == 126 || code == 125 {
+            direction = code == 126 ? .up : .down
+        } else {
+            let modifiers = flags.intersection([.maskControl, .maskCommand, .maskAlternate, .maskShift])
+            guard modifiers.isEmpty || modifiers == [.maskAlternate, .maskShift] else { return pass }
+            switch code {
+            case 107: direction = .down
+            case 113: direction = .up
+            case 122 where captureStandardKeys: direction = .down
+            case 120 where captureStandardKeys: direction = .up
+            default: return pass
+            }
+        }
+        consumed[code] = direction
+        emit(direction, fine: fine)
+        return nil
+    }
+
+    private func emit(_ direction: StepDirection, fine: Bool) {
+        // Media-key events may have no pointer coordinates. Sample the actual cursor before queueing work.
+        let id = DisplayTopology.screenUnderMouse()
+        DispatchQueue.main.async { [weak self] in self?.onBrightnessStep?(direction, fine, id) }
+    }
+
+    deinit { stop() }
+}

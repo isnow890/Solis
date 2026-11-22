@@ -38,7 +38,7 @@ private struct BrightnessOSDView: View {
                     .foregroundStyle(.primary.opacity(0.92))
                     .frame(width: 44, height: 44)
 
-                Text("현재 선택된 화면")
+                Text("디스플레이 위치 확인")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {

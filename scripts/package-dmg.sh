@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="Solis"
+APP_NAME="halo"
 BUILD_DIR="$ROOT_DIR/build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 bundle_version=""

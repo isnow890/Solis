@@ -49,16 +49,22 @@ struct MenuBarPopoverView: View {
             }
 
             if let release = updates.available {
-                HStack {
-                    Text("Solis \(release.version) 업데이트")
-                        .font(.caption.weight(.semibold))
-                    Spacer()
-                    Link("릴리즈 열기", destination: release.url)
-                    Button("이 버전 건너뛰기", action: updates.skip)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("halo \(release.version) 업데이트")
+                            .font(.caption.weight(.semibold))
+                        Spacer()
+                        Link("릴리즈 열기", destination: release.url)
+                            .font(.caption.weight(.medium))
+                    }
+                    HStack(spacing: 6) {
+                        Button("나중에", action: updates.dismissForSession)
+                        Button("이 버전 건너뛰기", action: updates.skip)
+                    }
+                    .controlSize(.mini)
                 }
-                .font(.caption)
-                .controlSize(.small)
-                .padding(10)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
                 .background(Color.accentColor.opacity(0.10))
                 Divider()
             }
@@ -91,7 +97,7 @@ struct MenuBarPopoverView: View {
 
     private var headerBar: some View {
         HStack(spacing: 8) {
-            Text("Solis")
+            Text("halo")
                 .font(.headline)
 
             Spacer()
@@ -193,16 +199,29 @@ struct MenuBarPopoverView: View {
 
     // MARK: - Accessibility Callout (P0-1, P0-7)
 
+    private var accessibilityTitle: String {
+        if controller.needsPermissionRelaunch {
+            return "키보드 밝기 키 연결 대기"
+        }
+        if controller.needsAdditionalPermission {
+            return "키보드 이벤트 제어 권한 필요"
+        }
+        return "키보드 밝기 키 권한 필요"
+    }
+
     private var accessibilityHelp: String {
         if controller.needsPermissionRelaunch {
-            return "권한은 켜져 있지만 연결이 갱신되지 않았습니다. 앱을 재시작하거나, 설정에서 기존 Solis를 (−)로 삭제 후 다시 허용해 주세요."
+            return "권한은 켜져 있지만 연결이 갱신되지 않았습니다. 앱을 재시작하거나, 설정에서 기존 halo를 (−)로 삭제 후 다시 허용해 주세요."
+        }
+        if controller.needsAdditionalPermission {
+            return "손쉬운 사용은 허용되었지만 키보드 이벤트 제어 권한이 아직 필요합니다. 설정에서 halo의 권한을 확인해 주세요."
         }
         return "슬라이더와 해상도는 권한 없이도 바로 쓸 수 있습니다. 키보드 밝기 키만 권한이 필요합니다."
     }
 
     private var permissionSettingsHint: String {
         if #available(macOS 27.3, *) {
-            return "개인정보 보호 및 보안에서 Solis가 요청한 항목을 확인하세요."
+            return "개인정보 보호 및 보안에서 halo가 요청한 항목을 확인하세요."
         }
         if #available(macOS 27, *) { return "개인정보 보호 및 보안 > 기기 제어 및 데이터 접근" }
         return "개인정보 보호 및 보안 > 손쉬운 사용"
@@ -216,12 +235,16 @@ struct MenuBarPopoverView: View {
                     .foregroundStyle(.orange)
                     .padding(.top, 1)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(controller.needsPermissionRelaunch ? "키보드 밝기 키 연결 대기" : "키보드 밝기 키 권한 필요")
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(accessibilityTitle)
                         .font(.caption.weight(.semibold))
                     Text(accessibilityHelp)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(permissionSettingsHint)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -231,6 +254,10 @@ struct MenuBarPopoverView: View {
                     Button("앱 재시작", action: controller.relaunchApp)
                         .buttonStyle(.borderedProminent)
                     Button("설정 열기", action: controller.requestAccessibilityPermission)
+                } else if controller.needsAdditionalPermission {
+                    Button("설정 열기", action: controller.requestAccessibilityPermission)
+                        .buttonStyle(.borderedProminent)
+                    Button("나중에") { controller.permissionBannerDeferred = true }
                 } else {
                     Button("권한 허용", action: controller.requestAccessibilityPermission)
                         .buttonStyle(.borderedProminent)
@@ -238,7 +265,6 @@ struct MenuBarPopoverView: View {
                 }
             }
             .controlSize(.small)
-            .help(permissionSettingsHint)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
@@ -256,8 +282,10 @@ struct MenuBarPopoverView: View {
 
             VStack(spacing: 8) {
                 ForEach(controller.visibleDisplays) { display in
+                    let modeSource = controller.mirroredVirtualDisplay(for: display.id) ?? display
                     DisplayCardView(
                         display: display,
+                        modeSourceDisplay: modeSource,
                         isKeyTarget: controller.isKeyTarget(display.id),
                         keyTargetMode: controller.keyTargetMode,
                         mirrorState: controller.mirrorState(for: display.id),
@@ -282,7 +310,7 @@ struct MenuBarPopoverView: View {
                             controller.switchBackend(backend, for: display.id)
                         },
                         onModeSelect: { mode in
-                            controller.applyDisplayMode(mode, for: display)
+                            controller.applyDisplayMode(mode, for: modeSource)
                         },
                         onToggleVirtualHiDPI: {
                             controller.toggleVirtualHiDPIMirror(for: display)
@@ -368,9 +396,9 @@ struct MenuBarPopoverView: View {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.caption2)
                             .foregroundStyle(.orange)
-                        Text("승인 대기 · 로그인 항목에서 Solis를 켜주세요")
+                        Text("승인 대기 · 로그인 항목에서 halo를 켜주세요")
                             .font(.caption2)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(.primary)
                         Spacer()
                         Button("열기", action: controller.openLoginSettings)
                             .buttonStyle(.bordered)
@@ -382,11 +410,19 @@ struct MenuBarPopoverView: View {
                 }
             }
 
-            HStack {
-                Toggle("업데이트 자동 확인", isOn: $updates.automaticallyChecks)
-                    .toggleStyle(.switch)
-                Spacer()
-                Button(updates.checking ? "확인 중…" : "업데이트 확인…", action: updates.checkManually)
+            HStack(alignment: .center, spacing: 8) {
+                Toggle(isOn: $updates.automaticallyChecks) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("업데이트 자동 확인")
+                            .font(.callout)
+                        Text("하루 1회 GitHub에서 최신 버전 번호만 조회합니다.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+                Spacer(minLength: 4)
+                Button(updates.checking ? "확인 중…" : "지금 확인", action: updates.checkManually)
                     .disabled(updates.checking)
             }
             .controlSize(.small)
@@ -395,7 +431,7 @@ struct MenuBarPopoverView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("표준 F1 / F2로 밝기 조절")
                         .font(.callout)
-                    Text("켜면 다른 앱의 F1/F2 단축키 대신 Solis 밝기 조절이 동작합니다.")
+                    Text("켜면 다른 앱의 F1/F2 단축키 대신 halo 밝기 조절이 동작합니다.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -492,7 +528,7 @@ struct MenuBarPopoverView: View {
                 Text("단축키")
                     .font(.caption.weight(.semibold))
                 shortcutRow("☀ 밝기 키 · F14 / F15", "대상 화면 밝기 조절")
-                shortcutRow("표준 F1 / F2", controller.captureStandardKeys ? "Solis에서 사용 중" : "비활성")
+                shortcutRow("표준 F1 / F2", controller.captureStandardKeys ? "halo에서 사용 중" : "비활성")
                 shortcutRow("⌥⇧ 밝기 키", "1/4 미세 밝기 조절")
                 shortcutRow("⌃⌥↑ / ⌃⌥↓", controller.captureCtrlOptionArrows ? "외장 키보드 대체 키" : "비활성")
             }
@@ -507,7 +543,7 @@ struct MenuBarPopoverView: View {
 
                 Spacer()
 
-                Button("Solis 종료") {
+                Button("halo 종료") {
                     NSApp.terminate(nil)
                 }
                 .controlSize(.small)
@@ -533,6 +569,7 @@ struct MenuBarPopoverView: View {
 
 private struct DisplayCardView: View {
     let display: DisplayItem
+    let modeSourceDisplay: DisplayItem
     let isKeyTarget: Bool
     let keyTargetMode: BrightnessKeyTargetMode
     let mirrorState: VirtualMirrorState
@@ -551,15 +588,15 @@ private struct DisplayCardView: View {
     @State private var showAdvancedDrawer: Bool = false
 
     private var hasNativeHiDPI: Bool {
-        display.modes.contains { $0.isHiDPI }
+        modeSourceDisplay.modes.contains { $0.isHiDPI }
     }
 
     private var filteredModes: [DisplayModeItem] {
-        let hiDPI = display.modes.filter { $0.isHiDPI }
+        let hiDPI = modeSourceDisplay.modes.filter { $0.isHiDPI }
         if hiDPIOnly && !hiDPI.isEmpty {
             return hiDPI
         }
-        return display.modes
+        return modeSourceDisplay.modes
     }
 
     private var targetBadgeText: String? {
@@ -597,7 +634,7 @@ private struct DisplayCardView: View {
                         }
                     }
 
-                    Text(display.resolutionSummary)
+                    Text(modeSourceDisplay.resolutionSummary)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -622,6 +659,10 @@ private struct DisplayCardView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("\(display.name) 해상도 설정")
+            }
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                onHoverChange(hovering)
             }
 
             // Brightness Control Row
@@ -682,7 +723,7 @@ private struct DisplayCardView: View {
                         .foregroundStyle(.orange)
                     Text(error)
                         .font(.caption2)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(.primary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -701,7 +742,7 @@ private struct DisplayCardView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     // Refresh rate Picker menu (P1-8: replaces hidden horizontal scroll)
-                    if display.currentResolutionRefreshModes.count > 1 {
+                    if modeSourceDisplay.currentResolutionRefreshModes.count > 1 {
                         HStack {
                             Text("주사율")
                                 .font(.caption2.weight(.semibold))
@@ -709,17 +750,17 @@ private struct DisplayCardView: View {
                             Spacer()
                             Picker("주사율", selection: Binding(
                                 get: {
-                                    display.currentResolutionRefreshModes.first(where: { $0.isCurrent })?.id
-                                        ?? display.currentResolutionRefreshModes.first?.id
+                                    modeSourceDisplay.currentResolutionRefreshModes.first(where: { $0.isCurrent })?.id
+                                        ?? modeSourceDisplay.currentResolutionRefreshModes.first?.id
                                         ?? ""
                                 },
                                 set: { selectedID in
-                                    if let chosen = display.currentResolutionRefreshModes.first(where: { $0.id == selectedID }) {
+                                    if let chosen = modeSourceDisplay.currentResolutionRefreshModes.first(where: { $0.id == selectedID }) {
                                         onModeSelect(chosen)
                                     }
                                 }
                             )) {
-                                ForEach(display.currentResolutionRefreshModes) { hzMode in
+                                ForEach(modeSourceDisplay.currentResolutionRefreshModes) { hzMode in
                                     Text(hzMode.refreshLabel).tag(hzMode.id)
                                 }
                             }
@@ -733,7 +774,7 @@ private struct DisplayCardView: View {
 
                     // Filter Header
                     HStack {
-                        Text("해상도")
+                        Text(mirrorState.isActive ? "가상 HiDPI 해상도" : "해상도")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Spacer()
@@ -742,7 +783,7 @@ private struct DisplayCardView: View {
                                 .toggleStyle(.checkbox)
                                 .controlSize(.mini)
                                 .font(.caption2)
-                        } else {
+                        } else if !mirrorState.isActive {
                             Text("네이티브 HiDPI 없음 · 아래 고급에서 가상 HiDPI 사용")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
@@ -858,9 +899,6 @@ private struct DisplayCardView: View {
                     lineWidth: isKeyTarget ? 1.25 : 0.75
                 )
         )
-        .onHover { hovering in
-            onHoverChange(hovering)
-        }
         .onDisappear { onHoverChange(false) }
     }
 

@@ -36,7 +36,7 @@ jobs:
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Build & Package Solis.app
+      - name: Build & Package halo.app
         env:
           CODESIGN_IDENTITY: "-"
           VERSION: ${{ steps.meta.outputs.version }}
@@ -49,9 +49,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
-          name: Solis ${{ steps.meta.outputs.tag }}
+          name: halo ${{ steps.meta.outputs.tag }}
           generate_release_notes: true
           files: |
-            build/Solis-v${{ steps.meta.outputs.version }}-*.dmg
-            build/Solis-v${{ steps.meta.outputs.version }}-*.zip
+            build/halo-v${{ steps.meta.outputs.version }}-*.dmg
+            build/halo-v${{ steps.meta.outputs.version }}-*.zip
             build/SHA256SUMS.txt

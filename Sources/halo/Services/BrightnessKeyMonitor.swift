@@ -9,12 +9,13 @@ final class BrightnessKeyMonitor: NSObject {
         var enabled = false
         var mask: CGEventMask = 0
         var ready: Bool { enabled && mask & requiredMask == requiredMask }
-        var needsRelaunch: Bool { accessibility && !ready }
+        var needsAdditionalPermission: Bool { accessibility && !postEvent && !ready }
+        var needsRelaunch: Bool { accessibility && postEvent && !ready }
     }
 
     static let requiredMask: CGEventMask = (1 << 14) | (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
-    static let standardKeysPreference = "Solis.captureStandardFunctionKeys"
-    static let ctrlOptionArrowsPreference = "Solis.captureCtrlOptionArrows"
+    static let standardKeysPreference = "halo.captureStandardFunctionKeys"
+    static let ctrlOptionArrowsPreference = "halo.captureCtrlOptionArrows"
 
     static var standardKeysDefault: Bool {
         let defaults = UserDefaults.standard

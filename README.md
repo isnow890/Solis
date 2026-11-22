@@ -1,23 +1,19 @@
 <p align="center">
-  <img src="docs/assets/icon.png" width="120" height="120" alt="Solis App Icon" />
+  <img src="docs/assets/icon.png" width="116" height="116" alt="halo app icon" />
 </p>
 
-<h1 align="center">Solis</h1>
+<h1 align="center">halo</h1>
 
 <p align="center">
   <strong>Lightweight native macOS menu bar app for cursor-aware per-display brightness &amp; HiDPI scaling.</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/isnow890/Solis/actions/workflows/ci.yml">
-    <img src="https://img.shields.io/github/actions/workflow/status/isnow890/Solis/ci.yml?label=build&style=flat-square" alt="CI Build" />
-  </a>
+  <a href="https://github.com/isnow890/halo/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/isnow890/halo/ci.yml?label=build&style=flat-square" alt="CI Build" /></a>
   <img src="https://img.shields.io/badge/macOS-14%2B-000000?style=flat-square&logo=apple&logoColor=white" alt="macOS 14+" />
   <img src="https://img.shields.io/badge/Apple%20Silicon-arm64-3ee6be?style=flat-square" alt="Apple Silicon" />
   <img src="https://img.shields.io/badge/Swift-6-F05138?style=flat-square&logo=swift&logoColor=white" alt="Swift 6" />
-  <a href="LICENSE">
-    <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License" />
-  </a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License" /></a>
 </p>
 
 <p align="center">
@@ -26,38 +22,43 @@
 
 ---
 
-## Overview
+## Why halo?
 
-**Solis** brings the two most-used features of **MonitorControl** and **BetterDisplay** into one minimal, fast, pure-Swift macOS menu bar utility — with zero Electron overhead and no bloated preferences tree.
+**halo** combines the two everyday features people actually use from **MonitorControl** and **BetterDisplay** into a single fast, zero-dependency, pure-Swift menu bar app — no Electron, no background daemons, no sprawling preferences tree.
 
-- **Cursor-Aware Brightness Keys**: Press `F1` / `F2`, `F14` / `F15`, or `⌃⌥↑` / `⌃⌥↓` to adjust **whichever display your mouse cursor is currently on**, with a smooth 120Hz translucent HUD on that exact screen.
-- **3-Tier Brightness Control**:
-  - **Native (`DisplayServices`)** for MacBook built-in Liquid Retina / XDR & Apple displays
+- **Cursor-Aware Brightness Keys**: Press `F1` / `F2`, `F14` / `F15`, or `⌃⌥↑` / `⌃⌥↓` to adjust **only the display under your mouse cursor** (or switch to All / Main display), with a smooth 120Hz translucent HUD on that exact screen.
+- **3-Tier Brightness Engine**:
+  - **Native (`DisplayServices`)** for MacBook Liquid Retina / XDR & Apple displays
   - **Hardware DDC/CI (`IOAVService`)** for Apple Silicon external monitors (per-port serial queues & VCP readback verification)
-  - **Software Dimming (Overlay / Gamma LUT)** automatic fallback for DisplayLink adapters, DDC-less HDMI portable monitors, and sub-hardware dimming
-- **Native HiDPI & Refresh Rate Switcher**: Exposes hidden HiDPI/LoDPI modes and fractional refresh rates (`59.94Hz`, `47.95Hz`, `120Hz`, `130Hz`, etc.).
-- **One-Click Virtual HiDPI Mirroring (`CGVirtualDisplay`)**: Adds sharp 2× HiDPI scaling to non-Retina external monitors (including rotated portrait displays) without rebooting or disabling SIP.
-- **Display Override Export**: Export native macOS `scale-resolutions` `.plist` files for permanent EDID-level HiDPI.
+  - **Software Dimming (Overlay / Gamma LUT)** automatic fallback for DisplayLink docks, DDC-less portable monitors, and sub-hardware dimming
+- **Safe HiDPI & Refresh Rate Switcher**: Exposes hidden HiDPI/LoDPI modes and fractional refresh rates (`59.94Hz`, `47.95Hz`, `120Hz`, `130Hz`, etc.) with a **15-second auto-revert preview** so an unsupported mode never leaves you stuck.
+- **One-Click Virtual HiDPI Mirroring (`CGVirtualDisplay`)**: Sharp 2× HiDPI scaling on non-Retina external monitors (including vertical/portrait displays) without rebooting or disabling SIP.
+- **Hover-to-Identify & Display Override Export**: Hover a display card header to highlight that monitor on screen, or export native macOS `scale-resolutions` `.plist` overrides for permanent EDID-level HiDPI.
+- **Built-in Update Checker**: Zero-dependency GitHub Releases check (once per day, toggleable in Settings).
 
-<!-- Add screenshots here once captured:
-<p align="center">
-  <img src="docs/assets/popover.png" width="380" alt="Solis Menu Bar Popover" />
-  <img src="docs/assets/osd.png" width="260" alt="Solis Brightness OSD" />
-</p>
--->
+### Quick Comparison
+
+| Capability | halo | MonitorControl | BetterDisplay |
+| :--- | :---: | :---: | :---: |
+| Cursor-aware brightness keys + per-display HUD | ✅ | ✅ | ✅ |
+| Native + Apple Silicon DDC/CI + SW fallback | ✅ | ✅ | ✅ |
+| Native HiDPI & fractional refresh rate switcher | ✅ | — | ✅ |
+| One-click virtual HiDPI mirroring (`CGVirtualDisplay`) | ✅ | — | ✅ (Pro) |
+| 15s auto-revert resolution preview | ✅ | — | ✅ |
+| Pure Swift, zero third-party dependencies, MIT open source | ✅ | ✅ (MIT) | Proprietary |
 
 ---
 
 ## Installation
 
-### Option 1: Download Prebuilt App (GitHub Releases)
+### Option 1: Prebuilt Release (GitHub Releases)
 
-1. Download `Solis-vX.Y.Z-arm64.dmg` (or `.zip`) from the [Releases](https://github.com/isnow890/Solis/releases) page.
-2. Drag **Solis.app** into your `/Applications` folder.
-3. **If using an unnotarized / ad-hoc release build**, macOS Gatekeeper may block the first launch. Clear the quarantine attribute once:
+1. Download `halo-vX.Y.Z-arm64.dmg` (or `.zip`) from [Releases](https://github.com/isnow890/halo/releases).
+2. Drag **halo.app** into `/Applications`.
+3. Prebuilt releases are **ad-hoc signed (unnotarized)**. Clear macOS quarantine once before first launch:
    ```bash
-   xattr -cr /Applications/Solis.app
-   open /Applications/Solis.app
+   xattr -cr /Applications/halo.app
+   open /Applications/halo.app
    ```
 
 ### Option 2: Build from Source
@@ -65,15 +66,15 @@
 Requires macOS 14+ (Apple Silicon) and Xcode Command Line Tools (`swift`).
 
 ```bash
-git clone https://github.com/isnow890/Solis.git
-cd Solis
+git clone https://github.com/isnow890/halo.git
+cd halo
 
 # Ad-hoc local build (or omit CODESIGN_IDENTITY to sign with your Apple Development certificate)
 CODESIGN_IDENTITY="-" ./scripts/build-app.sh --install
-open /Applications/Solis.app
+open /Applications/halo.app
 ```
 
-To package a distributable `.dmg` and `.zip`:
+Package a `.dmg`, `.zip`, and `SHA256SUMS.txt`:
 
 ```bash
 VERSION=0.1.0 ./scripts/package-dmg.sh
@@ -83,7 +84,7 @@ VERSION=0.1.0 ./scripts/package-dmg.sh
 
 ## Permissions & Shortcuts
 
-To intercept global brightness keys (`F1`/`F2`, `F14`/`F15`, `⌃⌥↑`/`⌃⌥↓`), grant Solis permission in:
+Sliders, resolution switching, and virtual HiDPI work **without** any special permissions. To intercept global brightness keys, grant `halo` access in:
 
 - **macOS 14–26**: `System Settings → Privacy & Security → Accessibility`
 - **macOS 27+**: `System Settings → Privacy & Security → Device Control and Data Access`
@@ -91,30 +92,39 @@ To intercept global brightness keys (`F1`/`F2`, `F14`/`F15`, `⌃⌥↑`/`⌃⌥
 | Shortcut | Action |
 | :--- | :--- |
 | `☀` Brightness keys / `F14` · `F15` | Adjust brightness on the target display (default: cursor display) |
-| Standard `F1` · `F2` | Supported when *"Use standard F1/F2"* is enabled in Settings (auto-enabled if `fnState = 1`) |
-| `⌥ + ⇧ + Brightness Key` | Fine 1/64-step adjustment |
-| `⌃ + ⌥ + ↑ / ↓` | External keyboard fallback shortcut |
+| Standard `F1` · `F2` | Enabled via *"Use standard F1 / F2"* in Settings (auto-enabled when `fnState = 1`) |
+| `⌥ + ⇧ + Brightness Key` | Fine 1/64-step brightness adjustment |
+| `⌃ + ⌥ + ↑ / ↓` | External keyboard fallback shortcut (toggleable in Settings) |
 
 ---
 
-## Diagnostics (Read-Only)
+## Read-Only Diagnostics
 
-Run the built-in non-destructive hardware probe to inspect detected displays, DDC/CI status, event tap mask, and HiDPI modes:
+Inspect connected displays, Apple Silicon DDC/CI probe status, event tap permissions, and HiDPI modes without modifying any display state:
 
 ```bash
-/Applications/Solis.app/Contents/MacOS/Solis --diagnose
+/Applications/halo.app/Contents/MacOS/halo --diagnose
 ```
 
 ---
 
-## Known Limitations & Honest Notes
+## Privacy, Signing & Honest Notes
 
-Solis is shared as an open-source, as-is utility built for real Apple Silicon multi-monitor setups:
+1. **Daily Update Check (Opt-Out)**: When *"Check for updates automatically"* is on, `halo` sends one unauthenticated `GET` request per day to `https://api.github.com/repos/isnow890/halo/releases/latest` to compare the latest version tag. No analytics, telemetry, or personal data are collected, and you can disable it anytime in Settings.
+2. **Ad-Hoc Signing & Permission Re-Grant on Updates**: Prebuilt GitHub Release binaries are ad-hoc signed (`CODESIGN_IDENTITY="-"`). Because macOS ties Accessibility / Device Control permissions to an app's code signature, **you will need to remove and re-grant `halo` in Privacy & Security after updating** to a new prebuilt release. Building locally with your own Apple Development certificate preserves permissions across rebuilds.
+3. **Private macOS APIs**: Uses `DisplayServices`, `IOAVService`, and `CGVirtualDisplay` (the same underlying frameworks used by MonitorControl and BetterDisplay). All private symbols are loaded dynamically and degrade safely if a future macOS update changes them.
+4. **Not on the Mac App Store**: Global `CGEventTap` and `IOAVService` DDC/CI are incompatible with App Sandbox.
+5. **Hardware Variance**: DDC/CI depends on monitor firmware, hubs, and cables. DisplayLink adapters do not expose Apple Silicon `IOAVService` DDC/CI, so `halo` automatically falls back to Software Overlay / Gamma dimming.
+6. **Virtual Display Lifecycle**: Virtual HiDPI displays exist in process memory and disappear when `halo` quits. Clean exits restore prior mirror layouts; an abrupt crash (`SIGKILL`) may require re-arranging displays in System Settings.
 
-1. **Private macOS APIs**: Uses `DisplayServices`, `IOAVService`, and `CGVirtualDisplay` (the same underlying mechanisms used by MonitorControl and BetterDisplay). Future macOS updates can change private symbols; Solis loads them dynamically and fails safely when unavailable.
-2. **Not on the Mac App Store**: Global `CGEventTap` and `IOAVService` DDC/CI are incompatible with App Sandbox and Mac App Store guidelines.
-3. **Monitor / Adapter Variance**: DDC/CI behavior varies widely across monitors, hubs, and cables. DisplayLink adapters cannot pass Apple Silicon `IOAVService` DDC/CI, so Solis automatically falls back to Software Overlay / Gamma dimming.
-4. **Virtual HiDPI Mirroring**: Virtual displays live in process memory and disappear when Solis quits. Solis restores previous mirror relationships on clean exit, though an abrupt crash (`SIGKILL`) may require re-arranging displays in System Settings.
+<details>
+<summary><strong>Troubleshooting / FAQ</strong></summary>
+
+- **"halo is damaged and can't be opened"**: Run `xattr -cr /Applications/halo.app` once to remove the macOS download quarantine attribute from the ad-hoc release build.
+- **Brightness keys don't respond even though `halo` is toggled on in Settings**: macOS sometimes retains a stale TCC entry after replacing an ad-hoc signed app. Select `halo` in Privacy & Security, click `−` to remove it, relaunch `halo`, and grant permission again.
+- **External monitor only shows Software Dimming (`SW`)**: Verify DDC/CI is enabled in the monitor's own OSD menu. DisplayLink docks and some HDMI/USB-C adapters block I2C/DDC packets; run `/Applications/halo.app/Contents/MacOS/halo --diagnose` to see the exact probe result.
+
+</details>
 
 ---
 
@@ -123,11 +133,12 @@ Solis is shared as an open-source, as-is utility built for real Apple Silicon mu
 ```text
 Sources/
 ├── CDisplayBridge/        # Thin Objective-C bridge (DisplayServices, IOAVService DDC/CI, CGVirtualDisplay)
-└── Solis/
-    ├── SolisApp.swift     # Pure AppKit menu bar entry point, custom template icon & --diagnose CLI
+└── halo/
+    ├── HaloApp.swift      # Pure AppKit menu bar entry point, custom template icon & --diagnose CLI
     ├── Models/            # DisplayItem, DisplayModeItem, VirtualDisplayPreset
     ├── Services/          # DisplayController, DDCChannel, BrightnessKeyMonitor, BrightnessOSDController,
-    │                      # SoftwareDimmer, DisplayModeManager, VirtualDisplayManager, DisplayTopology
+    │                      # SoftwareDimmer, DisplayModeManager, VirtualDisplayManager, DisplayTopology,
+    │                      # UpdateChecker
     └── UI/                # SwiftUI MenuBarPopoverView
 ```
 

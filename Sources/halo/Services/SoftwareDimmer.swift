@@ -151,7 +151,7 @@ final class SoftwareDimmer {
         overlayWindows.removeAll()
         overlayLevels.removeAll()
         for id in DisplayTopology.onlineIDs() ?? [] where !resetGamma(for: id) {
-            NSLog("Solis: 감마 복원 실패 (display %u)", id)
+            NSLog("halo: 감마 복원 실패 (display %u)", id)
         }
     }
 }

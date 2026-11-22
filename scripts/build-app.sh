@@ -2,11 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="Solis"
-BUNDLE_ID="com.isnow890.solis"
+APP_NAME="halo"
+BUNDLE_ID="com.isnow890.halo"
 VERSION="${VERSION:-0.1.0}"
 if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*)){0,2}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-  echo "Invalid Solis version: $VERSION" >&2
+  echo "Invalid halo version: $VERSION" >&2
   exit 1
 fi
 BUILD_DIR="$ROOT_DIR/build"
@@ -24,7 +24,7 @@ if [[ ! -f "$BIN_PATH" ]]; then
 fi
 
 mkdir -p "$BUILD_DIR"
-stage=$(mktemp -d "$BUILD_DIR/.solis-stage.XXXXXX")
+stage=$(mktemp -d "$BUILD_DIR/.halo-stage.XXXXXX")
 install_stage=""
 cleanup() {
   rm -rf "$stage"
@@ -121,7 +121,7 @@ SWIFT
 }
 publish_bundle "$APP_BUNDLE" "$OUTPUT"
 if [[ "${1:-}" == "--install" ]]; then
-  install_stage=$(mktemp -d "/Applications/.solis-stage.XXXXXX")
+  install_stage=$(mktemp -d "/Applications/.halo-stage.XXXXXX")
   ditto "$OUTPUT" "$install_stage/$APP_NAME.app"
   codesign --verify --strict "$install_stage/$APP_NAME.app"
   publish_bundle "$install_stage/$APP_NAME.app" "$INSTALL_PATH"

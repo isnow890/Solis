@@ -456,7 +456,7 @@ BOOL LDDDCWriteVCP(CFTypeRef avService,
     Class DescriptorClass = NSClassFromString(@"CGVirtualDisplayDescriptor");
     Class DisplayClass = NSClassFromString(@"CGVirtualDisplay");
 
-    _displayQueue = dispatch_queue_create("com.isnow890.solis.virtualDisplay", DISPATCH_QUEUE_SERIAL);
+    _displayQueue = dispatch_queue_create("com.isnow890.halo.virtualDisplay", DISPATCH_QUEUE_SERIAL);
 
     CGVirtualDisplayDescriptor *descriptor = [[DescriptorClass alloc] init];
     descriptor.name = name;

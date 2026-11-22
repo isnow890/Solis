@@ -26,6 +26,7 @@ final class DisplayController: ObservableObject {
     private var waitingForFirstConnection = false
     private var announcedKeyConnection = false
 
+    var needsAdditionalPermission: Bool { keyStatus.needsAdditionalPermission }
     var needsPermissionRelaunch: Bool { keyStatus.needsRelaunch }
 
     @Published var captureStandardKeys = BrightnessKeyMonitor.standardKeysDefault {
@@ -62,12 +63,22 @@ final class DisplayController: ObservableObject {
     func refreshLoginStatus() { loginStatus = SMAppService.mainApp.status }
     func openLoginSettings() { SMAppService.openSystemSettingsLoginItems() }
 
-    /// Displays shown as cards in the popover (hides internal Solis virtual displays that are mirroring a physical display).
+    /// Displays shown as cards in the popover (hides internal halo virtual displays that are mirroring a physical display).
     var visibleDisplays: [DisplayItem] {
         let mirroredVirtualIDs = Set(virtualDisplays.compactMap { v -> CGDirectDisplayID? in
             v.mirroredPhysicalDisplayID != nil ? v.displayID : nil
         })
         return displays.filter { !mirroredVirtualIDs.contains($0.id) }
+    }
+
+    /// Returns the active virtual HiDPI display backing a mirrored physical display so its scaled HiDPI modes remain selectable.
+    func mirroredVirtualDisplay(for physicalID: CGDirectDisplayID) -> DisplayItem? {
+        guard let record = virtualDisplayManager.mirrorRecord(forPhysicalDisplayID: physicalID),
+              !virtualDisplayManager.isPending(record.id),
+              CGDisplayMirrorsDisplay(physicalID) == record.displayID else {
+            return nil
+        }
+        return displays.first { $0.id == record.displayID }
     }
 
     /// Standalone virtual displays (excluding ones attached as physical HiDPI mirrors).
@@ -119,10 +130,10 @@ final class DisplayController: ObservableObject {
     private var smoothTargetBackend: [CGDirectDisplayID: BrightnessBackend] = [:]
 
     private enum DefaultsKey {
-        static let keyTargetMode = "Solis.keyTargetMode"
-        static let cleanupVirtualOnQuit = "Solis.cleanupVirtualOnQuit"
-        static let backendPrefix = "Solis.backend."
-        static let softwareBrightnessPrefix = "Solis.swBrightness."
+        static let keyTargetMode = "halo.keyTargetMode"
+        static let cleanupVirtualOnQuit = "halo.cleanupVirtualOnQuit"
+        static let backendPrefix = "halo.backend."
+        static let softwareBrightnessPrefix = "halo.swBrightness."
     }
 
     init() {
@@ -446,7 +457,7 @@ final class DisplayController: ObservableObject {
                 continue
             }
             if channels[item.id] == nil {
-                let queue = portQueues[port] ?? DispatchQueue(label: "com.isnow890.solis.ddc." + port, qos: .userInitiated)
+                let queue = portQueues[port] ?? DispatchQueue(label: "com.isnow890.halo.ddc." + port, qos: .userInitiated)
                 portQueues[port] = queue
                 channels[item.id] = DDCChannel(id: item.id, uuid: item.uuidString, port: port, queue: queue)
             }
@@ -1000,7 +1011,7 @@ final class DisplayController: ObservableObject {
 
     func createStandaloneVirtualDisplay(preset: VirtualDisplayPreset) {
         let count = virtualDisplayManager.activeVirtualDisplays.count + 1
-        let name = "Solis Virtual \(count)"
+        let name = "halo virtual \(count)"
         let created = virtualDisplayManager.createVirtualDisplay(name: name, preset: preset) { [weak self] in
             self?.refreshDisplays()
         }
@@ -1051,7 +1062,7 @@ final class DisplayController: ObservableObject {
 
         let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
-        let folder = desktop.appendingPathComponent("Solis-Overrides/\(override.directoryName)", isDirectory: true)
+        let folder = desktop.appendingPathComponent("halo-overrides/\(override.directoryName)", isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let fileURL = folder.appendingPathComponent(override.fileName)

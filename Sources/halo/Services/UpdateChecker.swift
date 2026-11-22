@@ -58,15 +58,15 @@ final class UpdateChecker: ObservableObject {
     struct Release {
         let tag: String
         var version: String { tag.first == "v" ? String(tag.dropFirst()) : tag }
-        var url: URL { URL(string: "https://github.com/isnow890/Solis/releases/tag/")!.appendingPathComponent(tag) }
+        var url: URL { URL(string: "https://github.com/isnow890/halo/releases/tag/")!.appendingPathComponent(tag) }
     }
 
     private struct Payload: Decodable { let tag_name: String }
     private enum Key {
-        static let automatic = "Solis.updates.automatic"
-        static let lastCheck = "Solis.updates.lastCheck"
-        static let cachedTag = "Solis.updates.latestTag"
-        static let skippedTag = "Solis.updates.skippedTag"
+        static let automatic = "halo.updates.automatic"
+        static let lastCheck = "halo.updates.lastCheck"
+        static let cachedTag = "halo.updates.latestTag"
+        static let skippedTag = "halo.updates.skippedTag"
     }
 
     @Published var automaticallyChecks: Bool {
@@ -157,10 +157,10 @@ final class UpdateChecker: ObservableObject {
         timer = nil
         checking = true
         defaults.set(Date(), forKey: Key.lastCheck)
-        var request = URLRequest(url: URL(string: "https://api.github.com/repos/isnow890/Solis/releases/latest")!)
+        var request = URLRequest(url: URL(string: "https://api.github.com/repos/isnow890/halo/releases/latest")!)
         request.timeoutInterval = 10
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("Solis", forHTTPHeaderField: "User-Agent")
+        request.setValue("halo", forHTTPHeaderField: "User-Agent")
         task = Task {
             do {
                 let (data, response) = try await session.data(for: request)
@@ -169,7 +169,7 @@ final class UpdateChecker: ObservableObject {
                 case 404:
                     available = nil
                     defaults.removeObject(forKey: Key.cachedTag)
-                    if manualRequested { manualMessage = "공개된 Solis 릴리즈를 찾지 못했습니다." }
+                    if manualRequested { manualMessage = "공개된 halo 릴리즈를 찾지 못했습니다." }
                 case 200:
                     let tag = try JSONDecoder().decode(Payload.self, from: data).tag_name
                     guard let version = ReleaseVersion(tag) else { throw URLError(.cannotParseResponse) }
@@ -197,6 +197,10 @@ final class UpdateChecker: ObservableObject {
         } else {
             available = nil
         }
+    }
+
+    func dismissForSession() {
+        available = nil
     }
 
     func skip() {

@@ -262,7 +262,7 @@ final class VirtualDisplayManager {
 
     func removeAll() {
         for id in Array(records.keys) where !removeVirtualDisplay(id: id) {
-            NSLog("Solis: 가상 화면 미러 관계 복원 실패 %@", id.uuidString)
+            NSLog("halo: 가상 화면 미러 관계 복원 실패 %@", id.uuidString)
         }
     }
 

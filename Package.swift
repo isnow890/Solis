@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "Solis",
+    name: "halo",
     platforms: [
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "Solis", targets: ["Solis"])
+        .executable(name: "halo", targets: ["halo"])
     ],
     targets: [
         .target(
@@ -25,9 +25,9 @@ let package = Package(
             ]
         ),
         .executableTarget(
-            name: "Solis",
+            name: "halo",
             dependencies: ["CDisplayBridge"],
-            path: "Sources/Solis",
+            path: "Sources/halo",
             swiftSettings: [
                 .swiftLanguageMode(.v5)
             ],

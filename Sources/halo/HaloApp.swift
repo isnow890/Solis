@@ -94,7 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     // MARK: - Diagnostics CLI Mode
 
     private static func runDiagnosticsAndExit() {
-        print("=== Solis Diagnostics ===")
+        print("=== halo Diagnostics ===")
         print("DisplayServices available: \(LDDisplayServicesIsAvailable())")
         print("IOAVService available:     \(LDIOAVServiceIsAvailable())")
         print("CGVirtualDisplay support:  \(LDVirtualDisplayHandle.isSupported())")
@@ -102,7 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         print("CLI preflight: AX=\(access.accessibility) PostEvent=\(access.postEvent)")
         print("Standard F1/F2 capture: \(BrightnessKeyMonitor.standardKeysDefault)")
         print("Ctrl+Option+Arrow capture: \(BrightnessKeyMonitor.ctrlOptionArrowsDefault)")
-        let apps = NSRunningApplication.runningApplications(withBundleIdentifier: "com.isnow890.solis")
+        let apps = NSRunningApplication.runningApplications(withBundleIdentifier: "com.isnow890.halo")
             .filter { $0.processIdentifier != getpid() }
         if apps.isEmpty { print("GUI event tap: no running app") }
         for app in apps {
@@ -158,8 +158,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func setupStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
-            button.image = makeSolisMenuBarIcon()
-            button.toolTip = "Solis — 화면별 밝기 & HiDPI"
+            button.image = makeHaloMenuBarIcon()
+            button.toolTip = "halo — 화면별 밝기 & HiDPI"
             button.target = self
             button.action = #selector(statusItemClicked(_:))
             // Open immediately on mouseDown like native macOS menu bar items
@@ -168,8 +168,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         self.statusItem = item
     }
 
-    /// Custom monochrome template icon matching the asymmetric dual-ringed Saturn Solis app icon.
-    private func makeSolisMenuBarIcon() -> NSImage {
+    /// Custom monochrome template icon matching the asymmetric dual-ringed Saturn halo app icon.
+    private func makeHaloMenuBarIcon() -> NSImage {
         let size = NSSize(width: 20, height: 18)
         let image = NSImage(size: size, flipped: false) { rect in
             guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
@@ -257,7 +257,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             return true
         }
         image.isTemplate = true
-        image.accessibilityDescription = "Solis 디스플레이 제어"
+        image.accessibilityDescription = "halo 디스플레이 제어"
         return image
     }
 
@@ -355,16 +355,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         removeOutsideClickMonitor()
         let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: clicks) { [weak self] _ in
+            guard self?.controller?.pendingModeRevert == nil else { return }
             self?.closePopover()
         }
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: clicks.union(.keyDown)) { [weak self] event in
             guard let self else { return event }
             if event.type == .keyDown {
                 if event.keyCode == 53 {
-                    self.closePopover()
+                    if self.controller?.pendingModeRevert != nil {
+                        self.controller?.revertPendingMode()
+                    } else {
+                        self.closePopover()
+                    }
                     return nil
                 }
-            } else if let window = event.window,
+            } else if self.controller?.pendingModeRevert == nil,
+                      let window = event.window,
                       window !== self.statusItem?.button?.window,
                       window.level.rawValue < NSWindow.Level.popUpMenu.rawValue {
                 var ancestor: NSWindow? = window
@@ -414,19 +420,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         updateItem.target = self
         menu.addItem(updateItem)
 
-        let loginItem = NSMenuItem(title: "로그인 시 자동 실행", action: #selector(toggleLoginFromMenu), keyEquivalent: "")
-        loginItem.state = (controller?.launchAtLogin == true) ? .on : .off
+        let loginTitle = (controller?.loginNeedsApproval == true) ? "로그인 시 자동 실행 (승인 대기)" : "로그인 시 자동 실행"
+        let loginItem = NSMenuItem(title: loginTitle, action: #selector(toggleLoginFromMenu), keyEquivalent: "")
+        if controller?.loginNeedsApproval == true {
+            loginItem.state = .mixed
+        } else {
+            loginItem.state = (controller?.launchAtLogin == true) ? .on : .off
+        }
         loginItem.target = self
         menu.addItem(loginItem)
 
         menu.addItem(.separator())
 
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
-        let versionItem = NSMenuItem(title: "Solis \(version)", action: nil, keyEquivalent: "")
+        let versionItem = NSMenuItem(title: "halo \(version)", action: nil, keyEquivalent: "")
         versionItem.isEnabled = false
         menu.addItem(versionItem)
 
-        let quitItem = NSMenuItem(title: "Solis 종료", action: #selector(quitFromMenu), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "halo 종료", action: #selector(quitFromMenu), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
 

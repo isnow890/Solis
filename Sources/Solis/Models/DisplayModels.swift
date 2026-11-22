@@ -10,21 +10,31 @@ enum BrightnessBackend: String, CaseIterable, Codable, Identifiable {
 
     var id: String { rawValue }
 
-    var badgeText: String {
+    /// Unified user-facing label used across menus and tooltips.
+    var displayName: String {
         switch self {
-        case .native: return "Native"
-        case .ddc: return "DDC"
-        case .softwareOverlay: return "SW 오버레이"
-        case .softwareGamma: return "SW 감마"
+        case .native: return "하드웨어"
+        case .ddc: return "모니터(DDC)"
+        case .softwareOverlay: return "소프트웨어 디밍"
+        case .softwareGamma: return "감마 디밍"
         }
     }
 
-    var shortBadge: String {
+    var shortLabel: String {
         switch self {
-        case .native: return "Native"
-        case .ddc: return "DDC/CI"
-        case .softwareOverlay: return "Overlay"
-        case .softwareGamma: return "Gamma"
+        case .native: return "하드웨어"
+        case .ddc: return "DDC"
+        case .softwareOverlay: return "소프트웨어"
+        case .softwareGamma: return "감마"
+        }
+    }
+
+    var descriptionText: String {
+        switch self {
+        case .native: return "macOS 기본 백라이트 제어"
+        case .ddc: return "모니터 자체 백라이트 직접 제어"
+        case .softwareOverlay: return "반투명 오버레이로 화면 어둡게 표시"
+        case .softwareGamma: return "색상 테이블(LUT) 조절로 화면 어둡게 표시"
         }
     }
 }
@@ -39,7 +49,7 @@ enum BrightnessKeyTargetMode: String, CaseIterable, Codable, Identifiable {
     var title: String {
         switch self {
         case .mouseCursor: return "마우스 위치"
-        case .allDisplays: return "전체 동기화"
+        case .allDisplays: return "모든 화면"
         case .mainDisplay: return "메인 화면"
         }
     }
@@ -50,6 +60,50 @@ enum BrightnessKeyTargetMode: String, CaseIterable, Codable, Identifiable {
         case .allDisplays: return "rectangle.3.group"
         case .mainDisplay: return "macwindow"
         }
+    }
+}
+
+struct StatusBanner: Equatable, Identifiable {
+    enum Level: Equatable {
+        case info
+        case success
+        case warning
+        case error
+    }
+
+    let id = UUID()
+    let level: Level
+    let message: String
+    let autoDismiss: Bool
+}
+
+enum VirtualMirrorState: Equatable {
+    case idle
+    case connecting
+    case active
+    case failed(String)
+
+    var isConnecting: Bool {
+        if case .connecting = self { return true }
+        return false
+    }
+
+    var isActive: Bool {
+        if case .active = self { return true }
+        return false
+    }
+}
+
+struct PendingModeRevert: Equatable {
+    let displayID: CGDirectDisplayID
+    let displayName: String
+    let previousMode: CGDisplayMode
+    var secondsRemaining: Int
+
+    static func == (lhs: PendingModeRevert, rhs: PendingModeRevert) -> Bool {
+        lhs.displayID == rhs.displayID &&
+        lhs.secondsRemaining == rhs.secondsRemaining &&
+        lhs.previousMode.ioDisplayModeID == rhs.previousMode.ioDisplayModeID
     }
 }
 
@@ -73,8 +127,8 @@ struct DisplayModeItem: Identifiable, Hashable {
     }
 
     static func label(for rate: Double) -> String {
-        guard rate.isFinite, rate > 0 else { return "Hz 미보고" }
-        return rate.formatted(.number.precision(.fractionLength(0...3))) + "Hz"
+        guard rate.isFinite, rate > 0 else { return "주사율 미보고" }
+        return rate.formatted(.number.precision(.fractionLength(0...2))) + "Hz"
     }
 
     static func == (lhs: DisplayModeItem, rhs: DisplayModeItem) -> Bool {
@@ -98,6 +152,7 @@ struct DisplayItem: Identifiable {
     let isVirtual: Bool
     let isMirrored: Bool
     let mirrorMasterID: CGDirectDisplayID?
+    let frameMinX: CGFloat
 
     let logicalWidth: Int
     let logicalHeight: Int
@@ -110,12 +165,14 @@ struct DisplayItem: Identifiable {
     var brightness: Double
     var activeBackend: BrightnessBackend
     var supportedBackends: [BrightnessBackend]
-    var ddcState = "탐색 중"
+    var ddcUserStatus = "확인 중"
+    var ddcTechnicalDetail = ""
     var awaitingPreferredDDC = false
     var ddcReadable = false
     var ddcMaxValue: UInt16
     var modes: [DisplayModeItem]
     var currentResolutionRefreshModes: [DisplayModeItem]
+    var inlineError: String?
 
     var isHiDPI: Bool {
         pixelWidth > logicalWidth || scaleFactor >= 1.9
@@ -127,13 +184,15 @@ struct DisplayItem: Identifiable {
 
     var resolutionSummary: String {
         let hz = DisplayModeItem.label(for: refreshRate)
-        let dpi = isHiDPI ? "HiDPI" : "LoDPI"
-        return "\(logicalWidth)×\(logicalHeight) · \(dpi) · \(hz)"
+        if isHiDPI {
+            return "\(logicalWidth)×\(logicalHeight) · HiDPI · \(hz)"
+        }
+        return "\(logicalWidth)×\(logicalHeight) · \(hz)"
     }
 
     var symbolName: String {
         if isVirtual {
-            return "sparkles.rectangle.stack"
+            return "rectangle.dashed"
         }
         if isBuiltIn {
             return "laptopcomputer"
@@ -171,7 +230,6 @@ enum VirtualDisplayPreset: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Logical HiDPI resolutions exposed by CGVirtualDisplay (macOS doubles pixel backing when hiDPI=1)
     var logicalModes: [(width: Int, height: Int, hz: Double)] {
         switch self {
         case .uhd16x9:

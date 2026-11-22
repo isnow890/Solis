@@ -26,7 +26,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Pure menu bar app: stay in top status bar, never appear in Dock, never restore stray windows
         NSApp.setActivationPolicy(.accessory)
 
         // A replacement must start applying display state only after its predecessor has restored its LUTs.
@@ -68,7 +67,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        // Re-opening the app bundle opens the menu bar popover instead of spawning a blank window
         if let button = statusItem?.button {
             togglePopover(button)
         }
@@ -85,6 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let access = BrightnessKeyMonitor.Status()
         print("CLI preflight: AX=\(access.accessibility) PostEvent=\(access.postEvent)")
         print("Standard F1/F2 capture: \(BrightnessKeyMonitor.standardKeysDefault)")
+        print("Ctrl+Option+Arrow capture: \(BrightnessKeyMonitor.ctrlOptionArrowsDefault)")
         let apps = NSRunningApplication.runningApplications(withBundleIdentifier: "com.isnow890.solis")
             .filter { $0.processIdentifier != getpid() }
         if apps.isEmpty { print("GUI event tap: no running app") }
@@ -136,7 +135,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         exit(0)
     }
 
-    // MARK: - Menu Bar Status Item & Popover
+    // MARK: - Menu Bar Status Item & Popover (P1-13, P2)
 
     private func setupStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -145,7 +144,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             button.toolTip = "Solis — 화면별 밝기 & HiDPI"
             button.target = self
             button.action = #selector(statusItemClicked(_:))
-            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            // Open immediately on mouseDown like native macOS menu bar items
+            button.sendAction(on: [.leftMouseDown, .rightMouseDown])
         }
         self.statusItem = item
     }
@@ -159,15 +159,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             ctx.setShouldAntialias(true)
 
             let center = CGPoint(x: rect.midX, y: rect.midY)
-            let planetRadius: CGFloat = 4.25
+            // Slightly lighter planet radius & crisp ring thickness for clean legibility next to macOS SF Symbols
+            let planetRadius: CGFloat = 3.85
 
-            // Primary hero Saturn ring (-16°), wide & bold
-            let mainRX: CGFloat = 8.8
-            let mainRY: CGFloat = 2.4
+            let mainRX: CGFloat = 8.6
+            let mainRY: CGFloat = 2.45
             let mainTilt: CGFloat = -16.0 * .pi / 180.0
 
-            // Secondary low-angle accent orbit (+28°), tighter & thinner
-            let subRX: CGFloat = 7.4
+            let subRX: CGFloat = 7.1
             let subRY: CGFloat = 1.95
             let subTilt: CGFloat = 28.0 * .pi / 180.0
 
@@ -191,18 +190,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 return path
             }
 
-            // 1) Draw full asymmetric rings behind planet
+            // 1) Draw asymmetric rings behind planet
             ctx.setStrokeColor(NSColor.black.cgColor)
             ctx.setLineCap(.round)
-            ctx.setLineWidth(0.95)
+            ctx.setLineWidth(1.0)
             ctx.addPath(ellipsePath(rx: subRX, ry: subRY, angle: subTilt, frontOnly: false))
             ctx.strokePath()
 
-            ctx.setLineWidth(1.4)
+            ctx.setLineWidth(1.45)
             ctx.addPath(ellipsePath(rx: mainRX, ry: mainRY, angle: mainTilt, frontOnly: false))
             ctx.strokePath()
 
-            // 2) Draw solid center planet sphere
+            // 2) Draw center planet sphere
             let planetRect = CGRect(
                 x: center.x - planetRadius,
                 y: center.y - planetRadius,
@@ -212,40 +211,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             ctx.setFillColor(NSColor.black.cgColor)
             ctx.fillEllipse(in: planetRect)
 
-            // 3) Punch clean negative-space gap where the primary hero ring crosses in front of the planet
+            // 3) Punch crisp negative-space cutout along front arc
             ctx.saveGState()
             ctx.setBlendMode(.clear)
             ctx.setLineCap(.round)
-            ctx.setLineWidth(2.9)
+            ctx.setLineWidth(3.0)
             ctx.addPath(ellipsePath(rx: mainRX, ry: mainRY, angle: mainTilt, frontOnly: true))
             ctx.strokePath()
             ctx.restoreGState()
 
-            // 4) Draw crisp front arc of primary hero ring
+            // 4) Redraw front arc of hero ring
             ctx.setStrokeColor(NSColor.black.cgColor)
             ctx.setLineCap(.round)
-            ctx.setLineWidth(1.4)
+            ctx.setLineWidth(1.45)
             ctx.addPath(ellipsePath(rx: mainRX, ry: mainRY, angle: mainTilt, frontOnly: true))
             ctx.strokePath()
 
-            // 5) Tiny moon dot on upper-right of the secondary ring
-            let moonAngle: CGFloat = 0.28
+            // 5) Tiny moon accent at upper-right
+            let moonAngle: CGFloat = 0.26
             let mxLocal = cos(moonAngle) * subRX
             let myLocal = sin(moonAngle) * subRY
             let mx = center.x + mxLocal * cos(subTilt) - myLocal * sin(subTilt)
             let my = center.y + mxLocal * sin(subTilt) + myLocal * cos(subTilt)
             ctx.setFillColor(NSColor.black.cgColor)
-            ctx.fillEllipse(in: CGRect(x: mx - 1.15, y: my - 1.15, width: 2.3, height: 2.3))
+            ctx.fillEllipse(in: CGRect(x: mx - 1.1, y: my - 1.1, width: 2.2, height: 2.2))
 
             return true
         }
         image.isTemplate = true
+        image.accessibilityDescription = "Solis 디스플레이 제어"
         return image
     }
 
     private func setupPopover(controller: DisplayController) {
         let popover = NSPopover()
-        popover.behavior = .transient
+        // Use applicationDefined + our own outside-click monitor so clicking the status button cleanly toggles without close+reopen.
+        popover.behavior = .applicationDefined
         popover.animates = true
         popover.delegate = self
 
@@ -263,7 +264,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             return
         }
 
-        if event.type == .rightMouseUp {
+        let isRightOrCtrlClick = (event.type == .rightMouseDown || event.type == .rightMouseUp) ||
+            event.modifierFlags.contains(.control)
+
+        if isRightOrCtrlClick {
+            closePopover()
             showContextMenu(from: sender)
         } else {
             togglePopover(sender)
@@ -276,13 +281,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             closePopover()
         } else {
             if let screen = sender.window?.screen {
-                controller?.popoverAvailableHeight = max(1, screen.visibleFrame.height - 20)
+                controller?.popoverAvailableHeight = max(280, screen.visibleFrame.height - 24)
             }
             controller?.refreshAccessibilityStatus()
             controller?.refreshDisplays()
             controller?.startCursorTracking()
             NSApp.activate(ignoringOtherApps: true)
             popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+            // Keep popover readable even when software overlay dims the screen toward 0% (P2)
+            if let popWindow = popover.contentViewController?.view.window {
+                popWindow.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.screenSaverWindow)) + 2)
+            }
             installOutsideClickMonitor()
         }
     }
@@ -316,23 +325,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
+    // MARK: - Rich Right-Click Context Menu (P1-13)
+
     private func showContextMenu(from button: NSStatusBarButton) {
         let menu = NSMenu()
-        menu.addItem(withTitle: "디스플레이 새로고침", action: #selector(refreshFromMenu), keyEquivalent: "r")
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "Solis 종료", action: #selector(quitFromMenu), keyEquivalent: "q")
 
-        for item in menu.items {
+        let header = NSMenuItem(title: "키보드 밝기 대상", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+
+        for mode in BrightnessKeyTargetMode.allCases {
+            let item = NSMenuItem(title: mode.title, action: #selector(selectTargetModeFromMenu(_:)), keyEquivalent: "")
+            item.representedObject = mode.rawValue
+            item.state = (controller?.keyTargetMode == mode) ? .on : .off
             item.target = self
+            menu.addItem(item)
         }
+
+        menu.addItem(.separator())
+
+        let settingsItem = NSMenuItem(title: "설정…", action: #selector(openSettingsFromMenu), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
+        let loginItem = NSMenuItem(title: "로그인 시 자동 실행", action: #selector(toggleLoginFromMenu), keyEquivalent: "")
+        loginItem.state = (controller?.launchAtLogin == true) ? .on : .off
+        loginItem.target = self
+        menu.addItem(loginItem)
+
+        menu.addItem(.separator())
+
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
+        let versionItem = NSMenuItem(title: "Solis \(version)", action: nil, keyEquivalent: "")
+        versionItem.isEnabled = false
+        menu.addItem(versionItem)
+
+        let quitItem = NSMenuItem(title: "Solis 종료", action: #selector(quitFromMenu), keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(quitItem)
 
         statusItem?.menu = menu
         button.performClick(nil)
         statusItem?.menu = nil
     }
 
-    @objc private func refreshFromMenu() {
-        controller?.refreshDisplays()
+    @objc private func selectTargetModeFromMenu(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let mode = BrightnessKeyTargetMode(rawValue: raw) else { return }
+        controller?.keyTargetMode = mode
+    }
+
+    @objc private func openSettingsFromMenu() {
+        controller?.showSettingsInPopover = true
+        if let button = statusItem?.button, popover?.isShown != true {
+            togglePopover(button)
+        }
+    }
+
+    @objc private func toggleLoginFromMenu() {
+        let next = !(controller?.launchAtLogin ?? false)
+        controller?.setLaunchAtLogin(next)
     }
 
     @objc private func quitFromMenu() {

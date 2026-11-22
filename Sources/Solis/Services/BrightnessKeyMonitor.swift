@@ -9,22 +9,35 @@ final class BrightnessKeyMonitor {
         var enabled = false
         var mask: CGEventMask = 0
         var ready: Bool { enabled && mask & requiredMask == requiredMask }
+        /// True when macOS reports Accessibility granted yet the event tap still failed (rare stale-process case).
+        var needsRelaunch: Bool { accessibility && !ready }
     }
 
     static let requiredMask: CGEventMask = (1 << 14) | (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
     static let standardKeysPreference = "Solis.captureStandardFunctionKeys"
+    static let ctrlOptionArrowsPreference = "Solis.captureCtrlOptionArrows"
+
     static var standardKeysDefault: Bool {
         let defaults = UserDefaults.standard
         if let value = defaults.object(forKey: standardKeysPreference) as? Bool { return value }
         return defaults.bool(forKey: "com.apple.keyboard.fnState")
     }
 
+    static var ctrlOptionArrowsDefault: Bool {
+        let defaults = UserDefaults.standard
+        if let value = defaults.object(forKey: ctrlOptionArrowsPreference) as? Bool { return value }
+        return true
+    }
+
     var captureStandardKeys = standardKeysDefault
+    var captureCtrlOptionArrows = ctrlOptionArrowsDefault
     var onBrightnessStep: ((StepDirection, Bool, CGDirectDisplayID?) -> Void)?
     var onStatus: ((Status) -> Void)?
+
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
     private var poll: Timer?
+    private var fastPollDeadline: Date?
     private var retryInterval = 1.5
     private var consumed = [Int64: StepDirection]()
 
@@ -41,16 +54,26 @@ final class BrightnessKeyMonitor {
         }
     }
 
+    /// Requests Accessibility permission (single clean system prompt) and opens the relevant Settings pane.
     static func requestAccessibilityPermission() {
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
-        _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
-        if !CGPreflightPostEventAccess() { CGRequestPostEventAccess() }
+        let alreadyTrusted = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
+        if !alreadyTrusted {
+            openAccessibilitySettings()
+        }
     }
 
     static func openAccessibilitySettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
         }
+    }
+
+    /// Polls every 1 second for 60 seconds right after the user clicks "권한 허용" so returning from Settings feels instant.
+    func beginFastPolling(duration: TimeInterval = 60) {
+        fastPollDeadline = Date().addingTimeInterval(duration)
+        retryInterval = 1.0
+        refresh()
     }
 
     func refresh() {
@@ -62,8 +85,20 @@ final class BrightnessKeyMonitor {
             status = currentStatus()
         }
         onStatus?(status)
-        let interval = status.ready ? 15 : retryInterval
-        retryInterval = status.ready ? 1.5 : min(30, retryInterval * 2)
+
+        let interval: TimeInterval
+        if status.ready {
+            fastPollDeadline = nil
+            retryInterval = 1.5
+            interval = 15
+        } else if let deadline = fastPollDeadline, Date() < deadline {
+            interval = 1.0
+        } else {
+            fastPollDeadline = nil
+            interval = retryInterval
+            retryInterval = min(15, retryInterval * 1.6)
+        }
+
         let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in self?.refresh() }
         RunLoop.main.add(timer, forMode: .common)
         poll = timer
@@ -103,6 +138,7 @@ final class BrightnessKeyMonitor {
     func stop() {
         poll?.invalidate()
         poll = nil
+        fastPollDeadline = nil
         removeTap()
     }
 
@@ -134,7 +170,8 @@ final class BrightnessKeyMonitor {
         let direction: StepDirection
         if let held = consumed[code] {
             direction = held
-        } else if flags.contains([.maskControl, .maskAlternate]), !flags.contains(.maskCommand),
+        } else if captureCtrlOptionArrows,
+                  flags.contains([.maskControl, .maskAlternate]), !flags.contains(.maskCommand),
                   code == 126 || code == 125 {
             direction = code == 126 ? .up : .down
         } else {
@@ -154,7 +191,6 @@ final class BrightnessKeyMonitor {
     }
 
     private func emit(_ direction: StepDirection, fine: Bool) {
-        // Media-key events may have no pointer coordinates. Sample the actual cursor before queueing work.
         let id = DisplayTopology.screenUnderMouse()
         DispatchQueue.main.async { [weak self] in self?.onBrightnessStep?(direction, fine, id) }
     }

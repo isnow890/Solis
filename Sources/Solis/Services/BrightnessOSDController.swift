@@ -5,8 +5,14 @@ import CoreGraphics
 
 @MainActor
 private final class BrightnessOSDModel: ObservableObject {
+    enum Mode {
+        case brightness
+        case identify
+    }
+
+    @Published var mode: Mode = .brightness
     @Published var displayName: String = ""
-    @Published var backendBadge: String = ""
+    @Published var warningBadge: String?
     @Published var targetBrightness: Double = 1.0
     @Published var displayedBrightness: Double = 1.0
 }
@@ -17,67 +23,94 @@ private struct BrightnessOSDView: View {
     private let segmentCount = 16
 
     var body: some View {
+        let reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+
         VStack(spacing: 11) {
-            HStack(spacing: 6) {
-                Text(model.displayName)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+            Text(model.displayName)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .truncationMode(.tail)
 
-                Text(model.backendBadge)
-                    .font(.system(size: 9, weight: .medium))
-                    .padding(.horizontal, 5.5)
-                    .padding(.vertical, 2)
-                    .background(.primary.opacity(0.10), in: Capsule())
+            if model.mode == .identify {
+                Image(systemName: "display")
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(.primary.opacity(0.92))
+                    .frame(width: 44, height: 44)
+
+                Text("현재 선택된 화면")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-            }
+            } else {
+                Image(systemName: brightnessIcon)
+                    .font(.system(size: 38, weight: .light))
+                    .foregroundStyle(model.warningBadge == nil ? Color.primary.opacity(0.92) : Color.orange)
+                    .frame(width: 44, height: 44)
 
-            Image(systemName: brightnessIcon)
-                .font(.system(size: 38, weight: .light))
-                .foregroundStyle(.primary.opacity(0.92))
-                .frame(width: 44, height: 44)
+                // Single-pass GPU Canvas bar with destinationOut notches (crisp in both Light & Dark mode)
+                Canvas { context, size in
+                    let fullRect = CGRect(origin: .zero, size: size)
+                    let pill = Path(roundedRect: fullRect, cornerRadius: size.height / 2.0)
 
-            // Single-pass GPU Canvas bar driven by 120Hz lerp (zero SwiftUI transaction blink or vertical jump)
-            Canvas { context, size in
-                let fullRect = CGRect(origin: .zero, size: size)
-                let pill = Path(roundedRect: fullRect, cornerRadius: size.height / 2.0)
+                    context.drawLayer { layer in
+                        layer.clip(to: pill)
+                        layer.fill(pill, with: .color(.primary.opacity(0.18)))
 
-                context.clip(to: pill)
-                context.fill(pill, with: .color(.primary.opacity(0.16)))
+                        let fillW = size.width * CGFloat(min(max(model.displayedBrightness, 0.0), 1.0))
+                        if fillW > 0.5 {
+                            let fillRect = CGRect(x: 0, y: 0, width: fillW, height: size.height)
+                            layer.fill(Path(fillRect), with: .color(.primary.opacity(0.92)))
+                        }
 
-                let fillW = size.width * CGFloat(min(max(model.displayedBrightness, 0.0), 1.0))
-                if fillW > 0.5 {
-                    let fillRect = CGRect(x: 0, y: 0, width: fillW, height: size.height)
-                    context.fill(Path(fillRect), with: .color(.primary.opacity(0.92)))
+                        // Punch clean transparent gaps so notches read sharply over any fill or wallpaper
+                        layer.blendMode = .destinationOut
+                        let step = size.width / CGFloat(segmentCount)
+                        for idx in 1..<segmentCount {
+                            let x = step * CGFloat(idx)
+                            let tickRect = CGRect(x: x - 0.75, y: 0, width: 1.5, height: size.height)
+                            layer.fill(Path(tickRect), with: .color(.black))
+                        }
+                    }
                 }
+                .frame(width: 178, height: 8)
 
-                // Subtle 16-notch ticks
-                let step = size.width / CGFloat(segmentCount)
-                for idx in 1..<segmentCount {
-                    let x = step * CGFloat(idx)
-                    let tickRect = CGRect(x: x - 0.6, y: 0, width: 1.2, height: size.height)
-                    context.fill(Path(tickRect), with: .color(.black.opacity(0.13)))
+                if let warning = model.warningBadge {
+                    Text(warning)
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.20), in: Capsule())
+                        .foregroundStyle(.orange)
+                        .lineLimit(1)
+                } else {
+                    Text("\(Int((model.targetBrightness * 100).rounded()))%")
+                        .font(.caption.weight(.medium))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
                 }
             }
-            .frame(width: 178, height: 8)
-
-            Text("\(Int((model.targetBrightness * 100).rounded()))%")
-                .font(.system(size: 11, weight: .medium, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 16)
         .frame(width: 214)
         .background {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .strokeBorder(.primary.opacity(0.14), lineWidth: 0.75)
-                )
-                .shadow(color: .black.opacity(0.20), radius: 14, x: 0, y: 6)
+            if reduceTransparency {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(Color(nsColor: .windowBackgroundColor))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .strokeBorder(.primary.opacity(0.20), lineWidth: 0.75)
+                    )
+                    .shadow(color: .black.opacity(0.22), radius: 14, x: 0, y: 6)
+            } else {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(.regularMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .strokeBorder(.primary.opacity(0.14), lineWidth: 0.75)
+                    )
+                    .shadow(color: .black.opacity(0.20), radius: 14, x: 0, y: 6)
+            }
         }
         .padding(24)
         .background(Color.clear)
@@ -94,8 +127,8 @@ private struct BrightnessOSDView: View {
     }
 }
 
-/// Shows a native-looking translucent macOS HUD on the exact display whose brightness changed,
-/// with flicker-free 120Hz bar smoothing.
+/// Shows a native-looking translucent macOS HUD on the exact display whose brightness changed
+/// (or identifies a monitor on card hover), with flicker-free 120Hz bar smoothing.
 @MainActor
 final class BrightnessOSDController {
     private let model = BrightnessOSDModel()
@@ -113,7 +146,7 @@ final class BrightnessOSDController {
     func show(
         displayID: CGDirectDisplayID,
         displayName: String,
-        backendBadge: String,
+        warningBadge: String? = nil,
         brightness: Double
     ) {
         let clamped = min(max(brightness, 0.0), 1.0)
@@ -121,19 +154,46 @@ final class BrightnessOSDController {
         generation += 1
         let currentGeneration = generation
 
-        let switchedDisplay = (lastDisplayID != displayID) || (panel?.isVisible != true)
+        let switchedDisplay = (lastDisplayID != displayID) || (panel?.isVisible != true) || (model.mode != .brightness)
+        model.mode = .brightness
         model.displayName = displayName
-        model.backendBadge = backendBadge
+        model.warningBadge = warningBadge
         model.targetBrightness = clamped
 
-        if switchedDisplay {
-            // Snap bar on first appearance or when switching monitors, then animate subsequent steps
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if switchedDisplay || reduceMotion {
             model.displayedBrightness = clamped
             stopBarTimer()
         } else {
             startBarTimerIfNeeded()
         }
 
+        presentPanel(on: screen, displayID: displayID, generation: currentGeneration, duration: warningBadge == nil ? 1.05 : 1.8)
+        announceForVoiceOver("\(displayName) 밝기 \(Int((clamped * 100).rounded()))퍼센트" + (warningBadge.map { ", \($0)" } ?? ""))
+    }
+
+    func showIdentify(displayID: CGDirectDisplayID, displayName: String) {
+        guard let screen = DisplayTopology.screen(for: displayID) else { return }
+        generation += 1
+        let currentGeneration = generation
+
+        stopBarTimer()
+        model.mode = .identify
+        model.displayName = displayName
+        model.warningBadge = nil
+
+        presentPanel(on: screen, displayID: displayID, generation: currentGeneration, duration: 0.9)
+    }
+
+    func hideIfIdentify() {
+        guard model.mode == .identify, let panel, panel.isVisible else { return }
+        generation += 1
+        hideWorkItem?.cancel()
+        panel.orderOut(nil)
+        isFadingOut = false
+    }
+
+    private func presentPanel(on screen: NSScreen, displayID: CGDirectDisplayID, generation currentGeneration: Int, duration: TimeInterval) {
         let origin = NSPoint(
             x: screen.frame.midX - panelSize.width / 2.0,
             y: screen.frame.minY + min(124.0, screen.frame.height * 0.14)
@@ -178,29 +238,44 @@ final class BrightnessOSDController {
 
         hideWorkItem?.cancel()
 
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         if let panel {
             if !panel.isVisible {
                 isFadingOut = false
-                panel.alphaValue = 0.0
-                panel.orderFrontRegardless()
-                NSAnimationContext.runAnimationGroup { ctx in
-                    ctx.duration = 0.12
-                    ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                    panel.animator().alphaValue = 1.0
+                if reduceMotion {
+                    panel.alphaValue = 1.0
+                    panel.orderFrontRegardless()
+                } else {
+                    panel.alphaValue = 0.0
+                    panel.orderFrontRegardless()
+                    NSAnimationContext.runAnimationGroup { ctx in
+                        ctx.duration = 0.12
+                        ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                        panel.animator().alphaValue = 1.0
+                    }
                 }
             } else if isFadingOut || panel.alphaValue < 0.99 {
                 isFadingOut = false
-                NSAnimationContext.runAnimationGroup { ctx in
-                    ctx.duration = 0.08
-                    ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                    panel.animator().alphaValue = 1.0
+                if reduceMotion {
+                    panel.alphaValue = 1.0
+                } else {
+                    NSAnimationContext.runAnimationGroup { ctx in
+                        ctx.duration = 0.08
+                        ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                        panel.animator().alphaValue = 1.0
+                    }
                 }
             }
-            // If already visible at full alpha, do NOT trigger any AppKit alpha animation (prevents flicker!)
         }
 
         let workItem = DispatchWorkItem { [weak self] in
             guard let self, self.generation == currentGeneration, let panel = self.panel else { return }
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                panel.orderOut(nil)
+                self.isFadingOut = false
+                self.stopBarTimer()
+                return
+            }
             self.isFadingOut = true
             NSAnimationContext.runAnimationGroup({ ctx in
                 ctx.duration = 0.26
@@ -217,7 +292,19 @@ final class BrightnessOSDController {
             })
         }
         hideWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.05, execute: workItem)
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: workItem)
+    }
+
+    private func announceForVoiceOver(_ message: String) {
+        guard NSWorkspace.shared.isVoiceOverEnabled else { return }
+        NSAccessibility.post(
+            element: NSApp as Any,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: message,
+                .priority: NSAccessibilityPriorityLevel.medium.rawValue
+            ]
+        )
     }
 
     func close() {

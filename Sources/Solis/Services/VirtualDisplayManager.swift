@@ -20,7 +20,7 @@ final class VirtualDisplayManager {
         let previousMaster: CGDirectDisplayID
         let previousMasterUUID: String?
         var committed = false
-        var completion: ((Bool) -> Void)?
+        var completion: ((Bool, String?) -> Void)?
     }
 
     private var mirrors: [UUID: MirrorRequest] = [:]
@@ -82,26 +82,35 @@ final class VirtualDisplayManager {
     /// then mirrors the physical display onto it so macOS renders crisp 2x HiDPI.
     func enableHiDPIMirror(
         for physicalDisplay: DisplayItem,
-        onComplete: @escaping (Bool) -> Void
+        onComplete: @escaping (Bool, String?) -> Void
     ) {
-        // Avoid duplicating if already active
         if let record = mirrorRecord(forPhysicalDisplayID: physicalDisplay.id) {
-            onComplete(!isPending(record.id) && CGDisplayMirrorsDisplay(physicalDisplay.id) == record.displayID)
+            let active = !isPending(record.id) && CGDisplayMirrorsDisplay(physicalDisplay.id) == record.displayID
+            onComplete(active, active ? nil : "이미 가상 HiDPI 연결이 진행 중입니다.")
             return
         }
 
         let isPortrait = physicalDisplay.isPortrait
         let physicalID = physicalDisplay.id
         guard let identity = DisplayTopology.uuid(physicalID), identity == physicalDisplay.uuidString,
-              let online = DisplayTopology.onlineIDs(), online.contains(physicalID),
-              !online.contains(where: { CGDisplayMirrorsDisplay($0) == physicalID }),
-              physicalDisplay.logicalWidth > 0, physicalDisplay.logicalHeight > 0 else {
-            onComplete(false)
+              let online = DisplayTopology.onlineIDs(), online.contains(physicalID) else {
+            onComplete(false, "디스플레이 연결 상태가 변경되어 취소되었습니다.")
+            return
+        }
+        if online.contains(where: { CGDisplayMirrorsDisplay($0) == physicalID }) {
+            onComplete(false, "다른 화면이 이 디스플레이를 미러링 중이어서 적용할 수 없습니다.")
+            return
+        }
+        guard physicalDisplay.logicalWidth > 0, physicalDisplay.logicalHeight > 0 else {
+            onComplete(false, "현재 화면 해상도 정보를 확인할 수 없습니다.")
             return
         }
         let previous = CGDisplayMirrorsDisplay(physicalID)
         let previousUUID = previous == 0 ? nil : DisplayTopology.uuid(previous)
-        guard previous == 0 || previousUUID != nil else { onComplete(false); return }
+        guard previous == 0 || previousUUID != nil else {
+            onComplete(false, "기존 미러링 구성을 확인할 수 없어 안전하게 중단했습니다.")
+            return
+        }
         let width = Double(physicalDisplay.logicalWidth)
         let height = Double(physicalDisplay.logicalHeight)
         let fit = min(1, (isPortrait ? 1440 : 2560) / width, (isPortrait ? 2560 : 1440) / height)
@@ -109,7 +118,6 @@ final class VirtualDisplayManager {
         let baseH = max(1, Int(height * fit))
         let hz = physicalDisplay.refreshRate > 0 ? physicalDisplay.refreshRate : 60
 
-        // Target 2x backing canvas (capped at 5120 to stay well within GPU limits)
         let maxWidth = min(baseW * 2, isPortrait ? 2880 : 5120)
         let maxHeight = min(baseH * 2, isPortrait ? 5120 : 2880)
 
@@ -138,7 +146,7 @@ final class VirtualDisplayManager {
             mirroredPhysicalName: physicalDisplay.name,
             onChange: {}
         ) else {
-            onComplete(false)
+            onComplete(false, "가상 디스플레이 생성에 실패했습니다.")
             return
         }
 
@@ -153,7 +161,7 @@ final class VirtualDisplayManager {
                   var request = self.mirrors[id] else { return }
             let virtual = record.handle.displayID
             guard DisplayTopology.uuid(physical) == request.physicalUUID, CGDisplayIsOnline(physical) != 0 else {
-                self.failMirror(id)
+                self.failMirror(id, reason: "연결 대기 중 모니터 상태가 바뀌어 취소되었습니다.")
                 return
             }
             if CGDisplayIsOnline(virtual) != 0 && !request.committed,
@@ -161,7 +169,7 @@ final class VirtualDisplayManager {
                 guard CGDisplayMirrorsDisplay(physical) == request.previousMaster,
                       request.previousMaster == 0 || DisplayTopology.uuid(request.previousMaster) == request.previousMasterUUID,
                       LDMirrorDisplay(physical, virtual) else {
-                    self.failMirror(id)
+                    self.failMirror(id, reason: "macOS 미러링 구성 적용에 실패했습니다.")
                     return
                 }
                 request.committed = true
@@ -171,25 +179,25 @@ final class VirtualDisplayManager {
                let actual = CGDisplayCopyDisplayMode(virtual),
                self.matches(actual, specs: modes) {
                 self.pending.removeValue(forKey: id)
-                self.finishMirror(id, success: true)
+                self.finishMirror(id, success: true, reason: nil)
             } else if attempts > 1 {
                 self.awaitMirror(id: id, modes: modes, attempts: attempts - 1)
             } else {
-                self.failMirror(id)
+                self.failMirror(id, reason: "가상 HiDPI 모드가 제한 시간 안에 활성화되지 않았습니다.")
             }
         }
         pending[id] = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
     }
 
-    private func finishMirror(_ id: UUID, success: Bool) {
+    private func finishMirror(_ id: UUID, success: Bool, reason: String?) {
         let completion = mirrors[id]?.completion
         mirrors[id]?.completion = nil
-        completion?(success)
+        completion?(success, reason)
     }
 
-    private func failMirror(_ id: UUID) {
-        finishMirror(id, success: false)
+    private func failMirror(_ id: UUID, reason: String) {
+        finishMirror(id, success: false, reason: reason)
         _ = removeVirtualDisplay(id: id)
     }
 
@@ -267,7 +275,7 @@ final class VirtualDisplayManager {
             serialNumber: serial,
             terminationHandler: { [weak self] in
                 Task { @MainActor in
-                    self?.finishMirror(id, success: false)
+                    self?.finishMirror(id, success: false, reason: "가상 디스플레이가 시스템에 의해 종료되었습니다.")
                     self?.pending.removeValue(forKey: id)?.cancel()
                     self?.mirrors.removeValue(forKey: id)
                     self?.records.removeValue(forKey: id)

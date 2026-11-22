@@ -270,9 +270,74 @@ let specs: [(String, Int)] = [
     ("icon_512x512@2x.png", 1024)
 ]
 
+/// Dedicated crisp small-size icon (16px / 32px) for System Settings & Login Items lists:
+/// omits fine sub-ring/moon/aura haze and uses a bolder hero ring so the mint Saturn reads sharply at 16pt.
+func renderSmallIcon(size: Int) -> NSImage {
+    let s = CGFloat(size)
+    let image = NSImage(size: NSSize(width: s, height: s))
+    image.lockFocus()
+
+    guard let ctx = NSGraphicsContext.current?.cgContext else {
+        image.unlockFocus()
+        return image
+    }
+    ctx.setAllowsAntialiasing(true)
+    ctx.setShouldAntialias(true)
+
+    let margin = s * 0.08
+    let cardRect = CGRect(x: margin, y: margin, width: s - margin * 2, height: s - margin * 2)
+    let cornerRadius = cardRect.width * 0.24
+    let cardPath = CGPath(roundedRect: cardRect, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+
+    ctx.saveGState()
+    ctx.addPath(cardPath)
+    ctx.clip()
+
+    let bgColors = [
+        NSColor(calibratedRed: 0.08, green: 0.14, blue: 0.17, alpha: 1.0).cgColor,
+        NSColor(calibratedRed: 0.03, green: 0.06, blue: 0.09, alpha: 1.0).cgColor
+    ] as CFArray
+    if let bgGrad = CGGradient(colorsSpace: colorSpace, colors: bgColors, locations: [0.0, 1.0]) {
+        ctx.drawLinearGradient(bgGrad, start: CGPoint(x: cardRect.midX, y: cardRect.maxY), end: CGPoint(x: cardRect.midX, y: cardRect.minY), options: [])
+    }
+
+    let center = CGPoint(x: cardRect.midX, y: cardRect.midY)
+    let planetR = cardRect.width * 0.25
+    let mainRX = cardRect.width * 0.44
+    let mainRY = cardRect.width * 0.13
+    let tilt: CGFloat = -18.0 * .pi / 180.0
+    let ringW = max(1.6, cardRect.width * 0.075)
+    let ringColor = NSColor(calibratedRed: 0.82, green: 1.0, blue: 0.95, alpha: 0.98).cgColor
+
+    drawRingArc(ctx: ctx, center: center, rx: mainRX, ry: mainRY, angleRad: tilt, frontHalf: false, lineWidth: ringW, strokeColor: ringColor)
+
+    let planetRect = CGRect(x: center.x - planetR, y: center.y - planetR, width: planetR * 2, height: planetR * 2)
+    ctx.saveGState()
+    ctx.addEllipse(in: planetRect)
+    ctx.clip()
+    let planetColors = [
+        NSColor(calibratedRed: 0.85, green: 1.0, blue: 0.96, alpha: 1.0).cgColor,
+        NSColor(calibratedRed: 0.24, green: 0.92, blue: 0.76, alpha: 1.0).cgColor,
+        NSColor(calibratedRed: 0.06, green: 0.46, blue: 0.48, alpha: 1.0).cgColor
+    ] as CFArray
+    if let pGrad = CGGradient(colorsSpace: colorSpace, colors: planetColors, locations: [0.0, 0.45, 1.0]) {
+        ctx.drawRadialGradient(pGrad, startCenter: CGPoint(x: center.x - planetR * 0.28, y: center.y + planetR * 0.28), startRadius: 0, endCenter: center, endRadius: planetR * 1.15, options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+    }
+    ctx.restoreGState()
+
+    drawRingArc(ctx: ctx, center: center, rx: mainRX, ry: mainRY, angleRad: tilt, frontHalf: true, lineWidth: ringW, strokeColor: ringColor)
+
+    ctx.restoreGState()
+    image.unlockFocus()
+    return image
+}
+
 let master = renderIcon(size: 1024)
+let smallMaster = renderSmallIcon(size: 128)
 for (name, px) in specs {
-    try savePNG(master, to: iconsetDir.appendingPathComponent(name), pixelSize: px)
+    let source = px <= 32 ? smallMaster : master
+    try savePNG(source, to: iconsetDir.appendingPathComponent(name), pixelSize: px)
 }
 
 // Optional preview PNG if 2nd arg given

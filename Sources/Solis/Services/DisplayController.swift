@@ -15,16 +15,30 @@ final class DisplayController: ObservableObject {
     @Published private(set) var displays: [DisplayItem] = []
     @Published private(set) var cursorDisplayID: CGDirectDisplayID?
     @Published private(set) var virtualDisplays: [ManagedVirtualDisplayInfo] = []
+    @Published private(set) var mirrorStates: [CGDirectDisplayID: VirtualMirrorState] = [:]
+    @Published private(set) var pendingModeRevert: PendingModeRevert?
     @Published private(set) var keyStatus = BrightnessKeyMonitor.Status()
+    @Published private(set) var statusBanner: StatusBanner?
+    @Published var showSettingsInPopover: Bool = false
+
     var isAccessibilityGranted: Bool { keyStatus.ready }
+    var needsPermissionRelaunch: Bool { keyStatus.needsRelaunch }
+
     @Published var captureStandardKeys = BrightnessKeyMonitor.standardKeysDefault {
         didSet {
             keyMonitor.captureStandardKeys = captureStandardKeys
             UserDefaults.standard.set(captureStandardKeys, forKey: BrightnessKeyMonitor.standardKeysPreference)
         }
     }
+
+    @Published var captureCtrlOptionArrows = BrightnessKeyMonitor.ctrlOptionArrowsDefault {
+        didSet {
+            keyMonitor.captureCtrlOptionArrows = captureCtrlOptionArrows
+            UserDefaults.standard.set(captureCtrlOptionArrows, forKey: BrightnessKeyMonitor.ctrlOptionArrowsPreference)
+        }
+    }
+
     @Published var popoverAvailableHeight: CGFloat = 720
-    @Published private(set) var statusBannerMessage: String?
 
     @Published var keyTargetMode: BrightnessKeyTargetMode {
         didSet {
@@ -44,6 +58,31 @@ final class DisplayController: ObservableObject {
     func refreshLoginStatus() { loginStatus = SMAppService.mainApp.status }
     func openLoginSettings() { SMAppService.openSystemSettingsLoginItems() }
 
+    /// Displays shown as cards in the popover (hides internal Solis virtual displays that are mirroring a physical display).
+    var visibleDisplays: [DisplayItem] {
+        let mirroredVirtualIDs = Set(virtualDisplays.compactMap { v -> CGDirectDisplayID? in
+            v.mirroredPhysicalDisplayID != nil ? v.displayID : nil
+        })
+        return displays.filter { !mirroredVirtualIDs.contains($0.id) }
+    }
+
+    /// Standalone virtual displays (excluding ones attached as physical HiDPI mirrors).
+    var standaloneVirtualDisplays: [ManagedVirtualDisplayInfo] {
+        virtualDisplays.filter { $0.mirroredPhysicalDisplayID == nil }
+    }
+
+    /// Display IDs currently targeted by keyboard brightness keys (P0-3).
+    func isKeyTarget(_ displayID: CGDirectDisplayID) -> Bool {
+        switch keyTargetMode {
+        case .mouseCursor:
+            return cursorDisplayID == displayID
+        case .mainDisplay:
+            return resolvedTarget(for: CGMainDisplayID()) == displayID
+        case .allDisplays:
+            return visibleDisplays.contains { $0.id == displayID && !$0.isVirtual }
+        }
+    }
+
     let softwareDimmer = SoftwareDimmer()
     let virtualDisplayManager = VirtualDisplayManager()
     private var channels: [CGDirectDisplayID: DDCChannel] = [:]
@@ -59,6 +98,9 @@ final class DisplayController: ObservableObject {
 
     private var cursorPollTimer: Timer?
     private var reconfigDebounceItem: DispatchWorkItem?
+    private var bannerDismissItem: DispatchWorkItem?
+    private var identifyWorkItem: DispatchWorkItem?
+    private var revertTimer: Timer?
     private var reconfigRegistered = false
     private var lastNativeWriteTime: [CGDirectDisplayID: Date] = [:]
 
@@ -100,6 +142,7 @@ final class DisplayController: ObservableObject {
 
     private func setupKeyMonitor() {
         keyMonitor.captureStandardKeys = captureStandardKeys
+        keyMonitor.captureCtrlOptionArrows = captureCtrlOptionArrows
         keyMonitor.onStatus = { [weak self] in self?.keyStatus = $0 }
         keyMonitor.onBrightnessStep = { [weak self] direction, fine, desktop in
             self?.handleBrightnessHotkey(direction: direction, isFineStep: fine, desktop: desktop)
@@ -109,7 +152,7 @@ final class DisplayController: ObservableObject {
 
     func requestAccessibilityPermission() {
         BrightnessKeyMonitor.requestAccessibilityPermission()
-        refreshAccessibilityStatus()
+        keyMonitor.beginFastPolling(duration: 60)
     }
 
     func refreshAccessibilityStatus() {
@@ -126,7 +169,7 @@ final class DisplayController: ObservableObject {
         NSWorkspace.shared.openApplication(at: bundleURL, configuration: config) { [weak self] app, error in
             DispatchQueue.main.async {
                 guard app != nil, error == nil else {
-                    self?.showTemporaryMessage(error?.localizedDescription ?? "새 인스턴스를 시작하지 못했습니다.")
+                    self?.showBanner(.error, error?.localizedDescription ?? "새 인스턴스를 시작하지 못했습니다.")
                     return
                 }
                 NSApp.terminate(nil)
@@ -144,12 +187,12 @@ final class DisplayController: ObservableObject {
             }
             refreshLoginStatus()
         } catch {
-            showTemporaryMessage("로그인 시 자동 실행 설정 실패: \(error.localizedDescription)")
+            showBanner(.error, "로그인 시 자동 실행을 변경하지 못했습니다: \(error.localizedDescription)")
             refreshLoginStatus()
         }
     }
 
-    // MARK: - Cursor Tracking
+    // MARK: - Cursor Tracking & Hover Identification
 
     func startCursorTracking() {
         updateCursorDisplay()
@@ -164,10 +207,27 @@ final class DisplayController: ObservableObject {
     func stopCursorTracking() {
         cursorPollTimer?.invalidate()
         cursorPollTimer = nil
+        clearIdentify()
     }
 
     private func updateCursorDisplay() {
         cursorDisplayID = DisplayTopology.screenUnderMouse().flatMap(resolvedTarget(for:))
+    }
+
+    func scheduleIdentifyDisplay(_ display: DisplayItem) {
+        guard visibleDisplays.count > 1 else { return }
+        identifyWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.osdController.showIdentify(displayID: display.id, displayName: display.name)
+        }
+        identifyWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28, execute: work)
+    }
+
+    func clearIdentify() {
+        identifyWorkItem?.cancel()
+        identifyWorkItem = nil
+        osdController.hideIfIdentify()
     }
 
     // MARK: - Display Enumeration & Probing
@@ -191,13 +251,12 @@ final class DisplayController: ObservableObject {
             softwareDimmer.removeOverlay(for: item.id)
             lastNativeWriteTime.removeValue(forKey: item.id)
             inputVersion.removeValue(forKey: item.id)
+            mirrorStates.removeValue(forKey: item.id)
         }
 
         let screenByID: [CGDirectDisplayID: NSScreen] = Dictionary(
             uniqueKeysWithValues: NSScreen.screens.compactMap { screen in
-                guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else {
-                    return nil
-                }
+                guard let id = DisplayTopology.screenID(screen) else { return nil }
                 return (id, screen)
             }
         )
@@ -205,7 +264,7 @@ final class DisplayController: ObservableObject {
         var builtItems: [DisplayItem] = []
 
         for displayID in onlineIDs {
-            let screen = screenByID[displayID]
+            let screen = screenByID[displayID] ?? DisplayTopology.screen(for: displayID)
             let isBuiltIn = CGDisplayIsBuiltin(displayID) != 0
             let isMain = CGDisplayIsMain(displayID) != 0
             let isVirtual = virtualIDs.contains(displayID)
@@ -221,11 +280,11 @@ final class DisplayController: ObservableObject {
                 if let managed = virtualDisplays.first(where: { $0.displayID == displayID }) {
                     return managed.name
                 }
-                if let localized = screen?.localizedName, !localized.isEmpty {
+                if let localized = screenByID[displayID]?.localizedName, !localized.isEmpty {
                     return localized
                 }
                 if let old = previousByID[displayID], old.uuidString == uuidString { return old.name }
-                return isBuiltIn ? "Built-in Display" : "External Display \(displayID)"
+                return isBuiltIn ? "내장 디스플레이" : "외장 디스플레이 \(displayID)"
             }()
 
             let mode = CGDisplayCopyDisplayMode(displayID)
@@ -236,6 +295,7 @@ final class DisplayController: ObservableObject {
             let scale = screen?.backingScaleFactor ?? (logicalW > 0 ? CGFloat(pixelW) / CGFloat(logicalW) : 1.0)
             let hz = mode?.refreshRate ?? 0
             let rotation = CGDisplayRotation(displayID)
+            let frameMinX = screen?.frame.minX ?? CGDisplayBounds(displayID).minX
 
             let previous = previousByID[displayID].flatMap { $0.uuidString == uuidString ? $0 : nil }
             let canNative = !isVirtual && LDDisplayServicesCanChangeBrightness(displayID)
@@ -295,6 +355,7 @@ final class DisplayController: ObservableObject {
                 isVirtual: isVirtual,
                 isMirrored: isMirrored,
                 mirrorMasterID: mirrorMaster != 0 ? mirrorMaster : nil,
+                frameMinX: frameMinX,
                 logicalWidth: logicalW,
                 logicalHeight: logicalH,
                 pixelWidth: pixelW,
@@ -305,33 +366,41 @@ final class DisplayController: ObservableObject {
                 brightness: min(max(initialBrightness, 0.0), 1.0),
                 activeBackend: activeBackend,
                 supportedBackends: supported,
-                ddcState: channels[displayID] == nil ? "탐색 중" : previous?.ddcState ?? "탐색 중",
+                ddcUserStatus: channels[displayID] == nil ? "확인 중" : (previous?.ddcUserStatus ?? "확인 중"),
+                ddcTechnicalDetail: previous?.ddcTechnicalDetail ?? "",
                 awaitingPreferredDDC: awaitingDDC,
                 ddcReadable: channels[displayID] != nil && previous?.ddcReadable == true,
                 ddcMaxValue: previous?.ddcMaxValue ?? 100,
                 modes: modeBundle.modes,
-                currentResolutionRefreshModes: modeBundle.currentRefreshModes
+                currentResolutionRefreshModes: modeBundle.currentRefreshModes,
+                inlineError: previous?.inlineError
             )
 
             builtItems.append(item)
 
-            // Re-apply active software dimming if needed
+            // Sync mirror state with VirtualDisplayManager
+            if let record = virtualDisplayManager.mirrorRecord(forPhysicalDisplayID: displayID) {
+                mirrorStates[displayID] = virtualDisplayManager.isPending(record.id) ? .connecting : .active
+            } else if case .active = mirrorStates[displayID] {
+                mirrorStates[displayID] = .idle
+            }
+
             if activeBackend != .softwareOverlay { softwareDimmer.removeOverlay(for: displayID) }
             if activeBackend != .softwareGamma { _ = softwareDimmer.resetGamma(for: displayID) }
             if activeBackend == .softwareOverlay && !awaitingDDC && smoothTargetValue[displayID] == nil {
                 softwareDimmer.setOverlayBrightness(item.brightness, for: displayID)
             } else if activeBackend == .softwareGamma && previous?.activeBackend != .softwareGamma {
                 if !softwareDimmer.setGammaBrightness(item.brightness, for: displayID) {
-                    showTemporaryMessage(item.name + " · 저장된 감마를 적용할 수 없습니다.")
+                    setInlineError("저장된 감마 밝기를 적용하지 못했습니다.", for: displayID)
                 }
             }
         }
 
-        // Sort: Main first, then Built-in, then External by name, Virtual last
+        // Sort physically left-to-right (frameMinX) so cards match desk layout; virtual screens last.
         displays = builtItems.sorted { lhs, rhs in
             if lhs.isVirtual != rhs.isVirtual { return !lhs.isVirtual }
+            if abs(lhs.frameMinX - rhs.frameMinX) > 20 { return lhs.frameMinX < rhs.frameMinX }
             if lhs.isMain != rhs.isMain { return lhs.isMain }
-            if lhs.isBuiltIn != rhs.isBuiltIn { return lhs.isBuiltIn }
             return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
 
@@ -341,7 +410,10 @@ final class DisplayController: ObservableObject {
         // Probe Apple Silicon DDC/CI asynchronously for external non-built-in displays
         for item in displays where !item.isBuiltIn && !item.isVirtual {
             guard let port = ports[NSNumber(value: item.id)], LDIOAVServiceIsAvailable() else {
-                if let i = displays.firstIndex(where: { $0.id == item.id }) { displays[i].ddcState = "고유 포트 없음" }
+                if let i = displays.firstIndex(where: { $0.id == item.id }) {
+                    displays[i].ddcUserStatus = "직접 제어 미지원"
+                    displays[i].ddcTechnicalDetail = "직결된 외부 포트(AVService)를 찾지 못해 소프트웨어 디밍을 사용합니다."
+                }
                 continue
             }
             if channels[item.id] == nil {
@@ -364,7 +436,8 @@ final class DisplayController: ObservableObject {
             let wasWaiting = self.displays[i].awaitingPreferredDDC
             self.displays[i].awaitingPreferredDDC = false
             guard let reading else {
-                self.displays[i].ddcState = "AVService 없음"
+                self.displays[i].ddcUserStatus = "직접 제어 미지원"
+                self.displays[i].ddcTechnicalDetail = "포트(\(channel.port))에서 DDC 통신 채널을 열지 못했습니다."
                 if wasWaiting && self.displays[i].activeBackend == .softwareOverlay {
                     self.softwareDimmer.setOverlayBrightness(self.displays[i].brightness, for: item.id)
                 }
@@ -375,7 +448,15 @@ final class DisplayController: ObservableObject {
             }
             guard !self.ddcInFlight.contains(item.id), self.inputVersion[item.id, default: 0] == version else { return }
             self.displays[i].ddcReadable = reading.fraction != nil
-            self.displays[i].ddcState = reading.fraction == nil ? "쓰기 미검증 · " + reading.description : "읽기 확인"
+            if let fraction = reading.fraction {
+                self.displays[i].ddcUserStatus = "연결됨"
+                self.displays[i].ddcTechnicalDetail = "포트 \(channel.port) · \(reading.description)"
+                self.displays[i].ddcMaxValue = reading.maximum
+                self.lastDDCLevel[item.id] = fraction
+            } else {
+                self.displays[i].ddcUserStatus = "응답 없음"
+                self.displays[i].ddcTechnicalDetail = "포트 \(channel.port) · \(reading.description) (소프트웨어 디밍 권장)"
+            }
             let saved = self.loadPreferredBackend(uuid: channel.uuid)
             let useDDC = saved == .ddc || (saved == nil && reading.fraction != nil &&
                 !self.displays[i].supportedBackends.contains(.native))
@@ -385,25 +466,31 @@ final class DisplayController: ObservableObject {
                 self.softwareDimmer.removeOverlay(for: item.id)
                 self.displays[i].activeBackend = .ddc
             }
-            if let fraction = reading.fraction {
-                self.displays[i].ddcMaxValue = reading.maximum
-                self.lastDDCLevel[item.id] = fraction
-                if self.displays[i].activeBackend == .ddc { self.displays[i].brightness = fraction }
+            if let fraction = reading.fraction, self.displays[i].activeBackend == .ddc {
+                self.displays[i].brightness = fraction
             }
         }
     }
 
     // MARK: - Brightness Control
 
-    func setBrightness(_ value: Double, for displayID: CGDirectDisplayID, showOSD: Bool = false, smooth: Bool = false) {
+    func setBrightness(
+        _ value: Double,
+        for displayID: CGDirectDisplayID,
+        showOSD: Bool = false,
+        smooth: Bool = false,
+        osdTitleOverride: String? = nil
+    ) {
         guard !isShuttingDown, !topologyChanging, value.isFinite,
               let idx = displays.firstIndex(where: { $0.id == displayID }) else { return }
         guard !displays[idx].awaitingPreferredDDC else {
-            showTemporaryMessage(displays[idx].name + " · 저장한 DDC 포트를 확인하고 있습니다.")
+            setInlineError("모니터 직접 제어 연결을 확인하는 중입니다.", for: displayID)
             return
         }
         let clamped = min(max(value, 0), 1)
         let item = displays[idx]
+        let hudTitle = osdTitleOverride ?? item.name
+        displays[idx].inlineError = nil
         inputVersion[displayID, default: 0] += 1
         if showOSD {
             hudGeneration += 1
@@ -411,49 +498,52 @@ final class DisplayController: ObservableObject {
         }
         if smoothTargetValue[displayID] == nil { smoothRenderedValue[displayID] = item.brightness }
         displays[idx].brightness = clamped
+
+        let useSmooth = smooth && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         if item.activeBackend == .ddc {
-            writeDDC(clamped, item: item, showOSD: showOSD)
-        } else if applyBrightness(clamped, item: item, smooth: smooth), showOSD {
-            showHUD(item, level: clamped, badge: item.activeBackend.shortBadge)
+            writeDDC(clamped, item: item, showOSD: showOSD, hudTitle: hudTitle)
+        } else if applyBrightness(clamped, item: item, smooth: useSmooth, showOSDError: showOSD, hudTitle: hudTitle), showOSD {
+            osdController.show(displayID: item.id, displayName: hudTitle, warningBadge: nil, brightness: clamped)
         }
     }
 
-    private func showHUD(_ item: DisplayItem, level: Double, badge: String) {
-        osdController.show(displayID: item.id, displayName: item.name, backendBadge: badge, brightness: level)
-    }
-
-    private func writeDDC(_ level: Double, item: DisplayItem, showOSD: Bool) {
+    private func writeDDC(_ level: Double, item: DisplayItem, showOSD: Bool, hudTitle: String) {
         let id = item.id
         guard let channel = channels[id], let i = displays.firstIndex(where: { $0.id == id }) else { return }
         let requested = UInt16((level * Double(item.ddcMaxValue)).rounded())
-        displays[i].ddcState = "전송 중"
+        displays[i].ddcUserStatus = "적용 중"
         ddcInFlight.insert(id)
         let hudTicket = hudGeneration
         if showOSD {
-            showHUD(item, level: level, badge: item.ddcReadable ? "DDC/CI" : "DDC 미검증")
+            let warn = item.ddcReadable ? nil : "응답 미확인"
+            osdController.show(displayID: item.id, displayName: hudTitle, warningBadge: warn, brightness: level)
         }
         channel.write(requested, verify: item.ddcReadable) { [weak self, weak channel] result in
             guard let self, let channel, self.channels[id] === channel,
                   let i = self.displays.firstIndex(where: { $0.id == id && $0.activeBackend == .ddc })
             else { return }
             var reported = level
-            var badge: String
+            var warningBadge: String?
             switch result {
             case .failed:
                 reported = self.lastDDCLevel[id] ?? item.brightness
-                badge = "DDC 전송 실패"
-                self.showTemporaryMessage(item.name + " · " + badge)
+                self.displays[i].ddcUserStatus = "전송 실패"
+                self.displays[i].inlineError = "모니터 밝기 신호 전송에 실패했습니다. 소프트웨어 디밍으로 바꿔보세요."
+                warningBadge = "모니터 응답 없음"
             case .sent:
-                badge = item.ddcReadable ? "DDC 확인 중" : "DDC 전송 · 미검증"
+                self.displays[i].ddcUserStatus = item.ddcReadable ? "연결됨" : "신호 전송됨 (미확인)"
             case .readback(let reading):
                 if let actual = reading.fraction {
                     self.lastDDCLevel[id] = actual
                     self.displays[i].ddcMaxValue = reading.maximum
                     reported = actual
-                    badge = abs(level - actual) <= 0.5 / Double(reading.maximum) + 1e-9 ? "DDC 확인" : "DDC 장치값"
+                    self.displays[i].ddcUserStatus = "연결됨"
+                    self.displays[i].ddcTechnicalDetail = "포트 \(channel.port) · \(reading.description)"
+                    self.displays[i].inlineError = nil
                 } else {
-                    badge = "DDC 재조회 실패"
-                    self.showTemporaryMessage(item.name + " · " + reading.description)
+                    self.displays[i].ddcUserStatus = "확인 실패"
+                    self.displays[i].ddcTechnicalDetail = "포트 \(channel.port) · \(reading.description)"
+                    warningBadge = "상태 확인 실패"
                 }
             }
             if case .sent = result {
@@ -461,7 +551,6 @@ final class DisplayController: ObservableObject {
             } else {
                 self.ddcInFlight.remove(id)
             }
-            self.displays[i].ddcState = badge
             self.displays[i].brightness = reported
             let shouldUpdateHUD: Bool = {
                 switch result {
@@ -473,7 +562,7 @@ final class DisplayController: ObservableObject {
                 }
             }()
             if showOSD && shouldUpdateHUD && self.hudGeneration == hudTicket {
-                self.showHUD(item, level: reported, badge: badge)
+                self.osdController.show(displayID: item.id, displayName: hudTitle, warningBadge: warningBadge, brightness: reported)
             }
         }
     }
@@ -482,6 +571,7 @@ final class DisplayController: ObservableObject {
         guard !isShuttingDown, !topologyChanging, let idx = displays.firstIndex(where: { $0.id == displayID }) else { return }
         guard displays[idx].supportedBackends.contains(backend) else { return }
 
+        displays[idx].inlineError = nil
         let oldBackend = displays[idx].activeBackend
         if oldBackend == backend && !displays[idx].awaitingPreferredDDC {
             savePreferredBackend(backend, uuid: displays[idx].uuidString)
@@ -490,14 +580,13 @@ final class DisplayController: ObservableObject {
         displays[idx].awaitingPreferredDDC = false
 
         if oldBackend == .softwareGamma && !softwareDimmer.resetGamma(for: displayID) {
-            showTemporaryMessage("원래 감마를 복구하지 못했습니다.")
+            setInlineError("원래 색 보정(감마)을 복구하지 못했습니다.", for: displayID)
             return
         }
         clearAnimation(for: displayID)
         inputVersion[displayID, default: 0] += 1
         channels[displayID]?.cancelWrites()
         ddcInFlight.remove(displayID)
-        // Reset previous software dimmer if switching away
         if oldBackend == .softwareOverlay {
             softwareDimmer.removeOverlay(for: displayID)
         }
@@ -513,18 +602,24 @@ final class DisplayController: ObservableObject {
         } else if backend == .ddc {
             if let known = lastDDCLevel[displayID] { displays[idx].brightness = known }
         } else {
-            _ = applyBrightness(displays[idx].brightness, item: displays[idx])
+            _ = applyBrightness(displays[idx].brightness, item: displays[idx], smooth: false, showOSDError: false, hudTitle: displays[idx].name)
         }
     }
 
-    private func applyBrightness(_ clamped: Double, item: DisplayItem, smooth: Bool = false) -> Bool {
+    private func applyBrightness(
+        _ clamped: Double,
+        item: DisplayItem,
+        smooth: Bool,
+        showOSDError: Bool,
+        hudTitle: String
+    ) -> Bool {
         switch item.activeBackend {
         case .native:
             if smooth && DisplayTopology.screen(for: item.id) != nil {
                 enqueueSmoothBrightness(to: clamped, for: item.id, backend: .native)
             } else {
                 cancelSmoothBrightness(for: item.id, finalValue: clamped)
-                return writeNative(clamped, id: item.id)
+                return writeNative(clamped, id: item.id, hudTitle: hudTitle)
             }
 
         case .ddc:
@@ -533,7 +628,10 @@ final class DisplayController: ObservableObject {
         case .softwareOverlay:
             guard DisplayTopology.screen(for: item.id) != nil else {
                 if let i = displays.firstIndex(where: { $0.id == item.id }) { displays[i].brightness = item.brightness }
-                showTemporaryMessage(item.name + " · 오버레이를 표시할 데스크톱이 없습니다.")
+                setInlineError("소프트웨어 디밍을 표시할 화면 영역이 없습니다.", for: item.id)
+                if showOSDError {
+                    osdController.show(displayID: item.id, displayName: hudTitle, warningBadge: "디밍 불가", brightness: item.brightness)
+                }
                 return false
             }
             saveSoftwareBrightness(clamped, uuid: item.uuidString)
@@ -548,7 +646,10 @@ final class DisplayController: ObservableObject {
             cancelSmoothBrightness(for: item.id, finalValue: clamped)
             guard softwareDimmer.setGammaBrightness(clamped, for: item.id) else {
                 if let i = displays.firstIndex(where: { $0.id == item.id }) { displays[i].brightness = item.brightness }
-                showTemporaryMessage(item.name + " · 감마를 적용할 수 없습니다.")
+                setInlineError("감마 디밍을 적용하지 못했습니다. 소프트웨어 디밍으로 바꿔보세요.", for: item.id)
+                if showOSDError {
+                    osdController.show(displayID: item.id, displayName: hudTitle, warningBadge: "감마 적용 실패", brightness: item.brightness)
+                }
                 return false
             }
             saveSoftwareBrightness(clamped, uuid: item.uuidString)
@@ -556,14 +657,16 @@ final class DisplayController: ObservableObject {
         return true
     }
 
-    private func writeNative(_ value: Double, id: CGDirectDisplayID) -> Bool {
+    private func writeNative(_ value: Double, id: CGDirectDisplayID, hudTitle: String? = nil) -> Bool {
         guard LDDisplayServicesSetBrightness(id, Float(value)) else {
             var current: Float = 0
             if let i = displays.firstIndex(where: { $0.id == id }), LDDisplayServicesGetBrightness(id, &current) {
                 displays[i].brightness = Double(current)
-                if hudDisplay == id { showHUD(displays[i], level: Double(current), badge: "Native 실패") }
+                displays[i].inlineError = "하드웨어 밝기를 변경하지 못했습니다."
+                if hudDisplay == id {
+                    osdController.show(displayID: id, displayName: hudTitle ?? displays[i].name, warningBadge: "밝기 변경 실패", brightness: Double(current))
+                }
             }
-            showTemporaryMessage("Native 밝기 쓰기에 실패했습니다.")
             return false
         }
         lastNativeWriteTime[id] = Date()
@@ -608,7 +711,6 @@ final class DisplayController: ObservableObject {
         let dt = min(max(now - smoothLastTick, 1.0 / 240.0), 0.05)
         smoothLastTick = now
 
-        // Exponential critically-damped smoothing (~140ms smooth tail, silky on 120Hz ProMotion)
         let blend = 1.0 - exp(-dt * 20.0)
         var finishedIDs: [CGDirectDisplayID] = []
 
@@ -664,18 +766,23 @@ final class DisplayController: ObservableObject {
         switch keyTargetMode {
         case .mouseCursor:
             guard let desktop, let targetID = resolvedTarget(for: desktop) else { return }
-            adjustSingleDisplay(targetID, delta: delta, showOSD: true)
+            adjustSingleDisplay(targetID, delta: delta, showOSD: true, osdTitleOverride: nil)
 
         case .mainDisplay:
             guard let mainID = resolvedTarget(for: CGMainDisplayID()) else { return }
-            adjustSingleDisplay(mainID, delta: delta, showOSD: true)
+            adjustSingleDisplay(mainID, delta: delta, showOSD: true, osdTitleOverride: nil)
 
         case .allDisplays:
-            let physicals = displays.filter { !$0.isVirtual }
+            let physicals = visibleDisplays.filter { !$0.isVirtual }
             let underCursor = desktop.flatMap(resolvedTarget(for:))
             let hudTarget = physicals.first(where: { $0.id == underCursor })?.id ?? physicals.first?.id
             for item in physicals {
-                adjustSingleDisplay(item.id, delta: delta, showOSD: item.id == hudTarget)
+                adjustSingleDisplay(
+                    item.id,
+                    delta: delta,
+                    showOSD: item.id == hudTarget,
+                    osdTitleOverride: physicals.count > 1 ? "모든 화면" : nil
+                )
             }
         }
     }
@@ -686,17 +793,19 @@ final class DisplayController: ObservableObject {
            let physical = managed.mirroredPhysicalDisplayID, CGDisplayMirrorsDisplay(physical) == root {
             return physical
         }
-        // Ordinary mirror groups share one cursor. Prefer their physical master.
         return displays.first { $0.id == root && !$0.isVirtual }?.id ??
             displays.first { !$0.isVirtual && $0.mirrorMasterID == root }?.id ??
             displays.first { $0.id == desktop }?.id
     }
 
-    private func adjustSingleDisplay(_ displayID: CGDirectDisplayID, delta: Double, showOSD: Bool) {
+    private func adjustSingleDisplay(
+        _ displayID: CGDirectDisplayID,
+        delta: Double,
+        showOSD: Bool,
+        osdTitleOverride: String?
+    ) {
         guard let idx = displays.firstIndex(where: { $0.id == displayID }) else { return }
 
-        // Only resync from DisplayServices if enough time passed since our own write
-        // (prevents reading stale mid-ramp values that cause visible brightness bounce/flicker)
         if displays[idx].activeBackend == .native {
             let elapsed = lastNativeWriteTime[displayID].map { Date().timeIntervalSince($0) } ?? 10.0
             if elapsed > 0.8 && smoothTargetValue[displayID] == nil {
@@ -709,47 +818,130 @@ final class DisplayController: ObservableObject {
         }
 
         let nextVal = min(max(displays[idx].brightness + delta, 0.0), 1.0)
-        setBrightness(nextVal, for: displayID, showOSD: showOSD, smooth: true)
+        setBrightness(nextVal, for: displayID, showOSD: showOSD, smooth: true, osdTitleOverride: osdTitleOverride)
     }
 
-    // MARK: - Resolution & HiDPI
+    // MARK: - Resolution & HiDPI (with 15s External Revert Safeguard)
 
     func applyDisplayMode(_ mode: DisplayModeItem, for displayID: CGDirectDisplayID) {
         guard !isShuttingDown, !topologyChanging else { return }
+        let display = displays.first(where: { $0.id == displayID })
+        let previousMode = CGDisplayCopyDisplayMode(displayID)
+
         let ok = DisplayModeManager.applyMode(mode, to: displayID)
         if !ok {
-            showTemporaryMessage("해상도 전환에 실패했습니다.")
+            setInlineError("해상도를 변경하지 못했습니다.", for: displayID)
             return
         }
+
+        // Start 15-second keep/revert countdown for external displays to protect against black/unsupported modes.
+        if let display, !display.isBuiltIn, let previousMode, previousMode.ioDisplayModeID != mode.cgMode.ioDisplayModeID {
+            startModeRevertCountdown(displayID: displayID, displayName: display.name, previousMode: previousMode)
+        }
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             self?.refreshDisplays()
         }
     }
 
+    private func startModeRevertCountdown(displayID: CGDirectDisplayID, displayName: String, previousMode: CGDisplayMode) {
+        revertTimer?.invalidate()
+        pendingModeRevert = PendingModeRevert(
+            displayID: displayID,
+            displayName: displayName,
+            previousMode: previousMode,
+            secondsRemaining: 15
+        )
+        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, var pending = self.pendingModeRevert else {
+                    self?.revertTimer?.invalidate()
+                    self?.revertTimer = nil
+                    return
+                }
+                pending.secondsRemaining -= 1
+                if pending.secondsRemaining <= 0 {
+                    self.revertPendingMode()
+                } else {
+                    self.pendingModeRevert = pending
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        revertTimer = timer
+    }
+
+    func keepPendingMode() {
+        revertTimer?.invalidate()
+        revertTimer = nil
+        pendingModeRevert = nil
+    }
+
+    func revertPendingMode() {
+        revertTimer?.invalidate()
+        revertTimer = nil
+        guard let pending = pendingModeRevert else { return }
+        pendingModeRevert = nil
+
+        var config: CGDisplayConfigRef?
+        if CGBeginDisplayConfiguration(&config) == .success, let cfg = config {
+            if CGConfigureDisplayWithDisplayMode(cfg, pending.displayID, pending.previousMode, nil) == .success {
+                _ = CGCompleteDisplayConfiguration(cfg, .permanently)
+            } else {
+                CGCancelDisplayConfiguration(cfg)
+            }
+        }
+        showBanner(.info, "\(pending.displayName) 해상도를 이전 설정으로 되돌렸습니다.")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.refreshDisplays()
+        }
+    }
+
+    // MARK: - Virtual HiDPI Mirroring
+
+    func mirrorState(for displayID: CGDirectDisplayID) -> VirtualMirrorState {
+        if let state = mirrorStates[displayID] { return state }
+        if let record = virtualDisplayManager.mirrorRecord(forPhysicalDisplayID: displayID) {
+            return virtualDisplayManager.isPending(record.id) ? .connecting : .active
+        }
+        return .idle
+    }
+
     func toggleVirtualHiDPIMirror(for display: DisplayItem) {
         guard !isShuttingDown, !topologyChanging else { return }
+        if case .connecting = mirrorState(for: display.id) { return }
+
         if let record = virtualDisplayManager.mirrorRecord(forPhysicalDisplayID: display.id) {
             guard virtualDisplayManager.removeVirtualDisplay(id: record.id) else {
-                showTemporaryMessage("기존 미러 관계를 복원하지 못했습니다. 다시 시도하세요.")
+                mirrorStates[display.id] = .failed("기존 미러 구성을 복원하지 못했습니다. 다시 시도해 주세요.")
+                setInlineError("기존 미러 구성을 복원하지 못했습니다.", for: display.id)
                 return
             }
-            showTemporaryMessage("\(display.name) 가상 HiDPI 미러링 해제됨")
+            mirrorStates[display.id] = .idle
+            showBanner(.success, "\(display.name) 가상 HiDPI 미러링을 해제했습니다.")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
                 self?.refreshDisplays()
             }
         } else {
             guard virtualDisplayManager.isSupported else {
-                showTemporaryMessage("현재 macOS에서 CGVirtualDisplay를 사용할 수 없습니다.")
+                mirrorStates[display.id] = .failed("이 macOS 버전에서는 가상 HiDPI를 지원하지 않습니다.")
+                setInlineError("이 macOS 버전에서는 가상 HiDPI를 지원하지 않습니다.", for: display.id)
                 return
             }
-            virtualDisplayManager.enableHiDPIMirror(for: display) { [weak self] ok in
+            mirrorStates[display.id] = .connecting
+            setInlineError(nil, for: display.id)
+            virtualDisplayManager.enableHiDPIMirror(for: display) { [weak self] ok, reason in
                 Task { @MainActor in
+                    guard let self else { return }
                     if ok {
-                        self?.showTemporaryMessage("\(display.name) 가상 HiDPI 미러링 활성화됨")
+                        self.mirrorStates[display.id] = .active
+                        self.showBanner(.success, "\(display.name) 가상 HiDPI 미러링이 켜졌습니다.")
                     } else {
-                        self?.showTemporaryMessage("\(display.name) 가상 HiDPI 미러링 실패")
+                        let msg = reason ?? "가상 HiDPI 미러링을 시작하지 못했습니다."
+                        self.mirrorStates[display.id] = .failed(msg)
+                        self.setInlineError(msg, for: display.id)
                     }
-                    self?.refreshDisplays()
+                    self.refreshDisplays()
                 }
             }
         }
@@ -762,18 +954,18 @@ final class DisplayController: ObservableObject {
             self?.refreshDisplays()
         }
         if created != nil {
-            showTemporaryMessage("\(name) (\(preset.rawValue)) 생성됨")
+            showBanner(.success, "\(name) (\(preset.rawValue)) 가상 화면을 추가했습니다.")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
                 self?.refreshDisplays()
             }
         } else {
-            showTemporaryMessage("가상 디스플레이 생성에 실패했습니다.")
+            showBanner(.error, "가상 디스플레이를 생성하지 못했습니다.")
         }
     }
 
     func removeVirtualDisplay(id: UUID) {
         guard virtualDisplayManager.removeVirtualDisplay(id: id) else {
-            showTemporaryMessage("미러 관계 복원 실패 · 가상 화면을 유지합니다.")
+            showBanner(.error, "미러 관계 복원에 실패해 가상 화면을 유지합니다.")
             return
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
@@ -785,7 +977,10 @@ final class DisplayController: ObservableObject {
         let quarterTurn = Int(display.rotation.rounded()) % 180 != 0
         let baseW = quarterTurn ? display.logicalHeight : display.logicalWidth
         let baseH = quarterTurn ? display.logicalWidth : display.logicalHeight
-        guard baseW > 0, baseH > 0 else { showTemporaryMessage("화면 크기를 확인할 수 없습니다."); return }
+        guard baseW > 0, baseH > 0 else {
+            setInlineError("현재 화면 해상도 정보를 확인할 수 없습니다.", for: display.id)
+            return
+        }
         let aspect = Double(baseW) / Double(max(baseH, 1))
         let candidates: [(Int, Int)] = [
             (baseW, baseH),
@@ -799,7 +994,7 @@ final class DisplayController: ObservableObject {
             displayName: display.name,
             logicalResolutions: candidates
         ) else {
-            showTemporaryMessage("Override plist 생성 실패")
+            setInlineError("해상도 설정 파일 생성에 실패했습니다.", for: display.id)
             return
         }
 
@@ -811,9 +1006,9 @@ final class DisplayController: ObservableObject {
             let fileURL = folder.appendingPathComponent(override.fileName)
             try override.data.write(to: fileURL, options: .atomic)
             NSWorkspace.shared.activateFileViewerSelecting([fileURL])
-            showTemporaryMessage("패널 기본 방향 \(baseW)×\(baseH) 기준으로 저장했습니다. 모드 채택은 드라이버에 따라 다릅니다.")
+            showBanner(.success, "데스크톱에 해상도 설정 파일(\(baseW)×\(baseH) 기준)을 저장했습니다.")
         } catch {
-            showTemporaryMessage("Override 저장 실패: \(error.localizedDescription)")
+            setInlineError("파일 저장 실패: \(error.localizedDescription)", for: display.id)
         }
     }
 
@@ -823,7 +1018,7 @@ final class DisplayController: ObservableObject {
         guard !reconfigRegistered else { return }
         let pointer = Unmanaged.passUnretained(self).toOpaque()
         reconfigRegistered = CGDisplayRegisterReconfigurationCallback(displayChanged, pointer) == .success
-        if !reconfigRegistered { showTemporaryMessage("화면 구성 변경 감지를 등록하지 못했습니다.") }
+        if !reconfigRegistered { showBanner(.warning, "화면 연결 변경 감지를 등록하지 못했습니다.") }
     }
 
     fileprivate func configurationChanged(beginning: Bool) {
@@ -840,7 +1035,6 @@ final class DisplayController: ObservableObject {
             self?.refreshDisplays()
         }
         reconfigDebounceItem = item
-        // A cancelled WindowServer transaction may deliver only begin notifications.
         DispatchQueue.main.asyncAfter(deadline: .now() + (beginning ? 1.0 : 0.35), execute: item)
     }
 
@@ -849,6 +1043,10 @@ final class DisplayController: ObservableObject {
     func cleanupOnTerminate() {
         guard !isShuttingDown else { return }
         isShuttingDown = true
+        revertTimer?.invalidate()
+        revertTimer = nil
+        bannerDismissItem?.cancel()
+        identifyWorkItem?.cancel()
         if reconfigRegistered {
             CGDisplayRemoveReconfigurationCallback(displayChanged, Unmanaged.passUnretained(self).toOpaque())
             reconfigRegistered = false
@@ -871,7 +1069,37 @@ final class DisplayController: ObservableObject {
         }
     }
 
-    // MARK: - Persistence & Helpers
+    // MARK: - Banner & Inline Errors
+
+    func dismissStatusBanner() {
+        bannerDismissItem?.cancel()
+        bannerDismissItem = nil
+        statusBanner = nil
+    }
+
+    private func showBanner(_ level: StatusBanner.Level, _ message: String) {
+        bannerDismissItem?.cancel()
+        let autoDismiss = (level == .info || level == .success)
+        let banner = StatusBanner(level: level, message: message, autoDismiss: autoDismiss)
+        statusBanner = banner
+        if autoDismiss {
+            let work = DispatchWorkItem { [weak self] in
+                if self?.statusBanner?.id == banner.id {
+                    self?.statusBanner = nil
+                }
+            }
+            bannerDismissItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.5, execute: work)
+        }
+    }
+
+    private func setInlineError(_ message: String?, for displayID: CGDirectDisplayID) {
+        if let i = displays.firstIndex(where: { $0.id == displayID }) {
+            displays[i].inlineError = message
+        }
+    }
+
+    // MARK: - Persistence Helpers
 
     private func loadPreferredBackend(uuid: String) -> BrightnessBackend? {
         guard let raw = UserDefaults.standard.string(forKey: DefaultsKey.backendPrefix + uuid) else {
@@ -892,14 +1120,5 @@ final class DisplayController: ObservableObject {
 
     private func saveSoftwareBrightness(_ value: Double, uuid: String) {
         UserDefaults.standard.set(value, forKey: DefaultsKey.softwareBrightnessPrefix + uuid)
-    }
-
-    private func showTemporaryMessage(_ msg: String) {
-        statusBannerMessage = msg
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
-            if self?.statusBannerMessage == msg {
-                self?.statusBannerMessage = nil
-            }
-        }
     }
 }

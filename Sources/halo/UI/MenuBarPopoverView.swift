@@ -446,7 +446,7 @@ struct MenuBarPopoverView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("⌃⌥↑ / ⌃⌥↓ 대체 단축키 사용")
                         .font(.callout)
-                    Text("Rectangle 등 창 관리 앱과 충돌하면 끌 수 있습니다.")
+                    Text("밝기 키가 없는 외장 키보드용 옵션입니다 (기본 꺼짐).")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }

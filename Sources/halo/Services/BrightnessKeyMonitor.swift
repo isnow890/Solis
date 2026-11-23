@@ -28,7 +28,7 @@ final class BrightnessKeyMonitor: NSObject {
     static var ctrlOptionArrowsDefault: Bool {
         let defaults = UserDefaults.standard
         if let value = defaults.object(forKey: ctrlOptionArrowsPreference) as? Bool { return value }
-        return true
+        return false
     }
 
     var captureStandardKeys = standardKeysDefault

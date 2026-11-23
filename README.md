@@ -26,7 +26,7 @@
 
 **halo** combines the two everyday features people actually use from **MonitorControl** and **BetterDisplay** into a single fast, zero-dependency, pure-Swift menu bar app — no Electron, no background daemons, no sprawling preferences tree.
 
-- **Cursor-Aware Brightness Keys**: Press `F1` / `F2`, `F14` / `F15`, or `⌃⌥↑` / `⌃⌥↓` to adjust **only the display under your mouse cursor** (or switch to All / Main display), with a smooth 120Hz translucent HUD on that exact screen.
+- **Cursor-Aware Brightness Keys**: Press your Mac's brightness keys (`☀`, `F1` / `F2`, `F14` / `F15`, or optional `⌃⌥↑` / `⌃⌥↓`) to adjust **only the display under your mouse cursor** (or switch to All / Main display), with a smooth 120Hz translucent HUD on that exact screen.
 - **3-Tier Brightness Engine**:
   - **Native (`DisplayServices`)** for MacBook Liquid Retina / XDR & Apple displays
   - **Hardware DDC/CI (`IOAVService`)** for Apple Silicon external monitors (per-port serial queues & VCP readback verification)
@@ -90,7 +90,7 @@ On first launch, halo asks whether you want to use brightness keys while another
 | `☀` Brightness keys / `F14` · `F15` | Adjust brightness on the target display (default: cursor display) |
 | Standard `F1` · `F2` | Enabled via *"Use standard F1 / F2"* in Settings (auto-enabled when `fnState = 1`) |
 | `⌥ + ⇧ + Brightness Key` | Fine 1/64-step brightness adjustment |
-| `⌃ + ⌥ + ↑ / ↓` | External keyboard fallback shortcut (toggleable in Settings) |
+| `⌃ + ⌥ + ↑ / ↓` | Optional external keyboard shortcut (off by default; enable in Settings) |
 
 ---
 

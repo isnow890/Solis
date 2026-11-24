@@ -532,7 +532,7 @@ struct MenuBarPopoverView: View {
                     .font(.caption.weight(.semibold))
                 shortcutRow("☀ 밝기 키 · F14 / F15", "대상 화면 밝기 조절")
                 shortcutRow("표준 F1 / F2", controller.captureStandardKeys ? "halo에서 사용 중" : "비활성")
-                shortcutRow("⌥⇧ 밝기 키", "1/4 미세 밝기 조절")
+                shortcutRow("⌥⇧ 밝기 키", "1/64 단위 미세 밝기 조절")
                 shortcutRow("⌃⌥↑ / ⌃⌥↓", controller.captureCtrlOptionArrows ? "외장 키보드 대체 키" : "비활성")
             }
 
@@ -869,7 +869,7 @@ private struct DisplayCardView: View {
                                     Button("설정 파일 저장", action: onExportOverride)
                                         .buttonStyle(.bordered)
                                         .controlSize(.small)
-                                        .help("영구 네이티브 HiDPI용 macOS Display Override 파일을 데스크톱에 저장합니다.")
+                                        .help("영구 네이티브 HiDPI용 macOS Display Override 파일을 데스크톱에 저장합니다. 저장된 DisplayVendorID-… 폴더를 /Library/Displays/Contents/Resources/Overrides/ 에 복사한 뒤 재시동해야 적용됩니다.")
                                 }
 
                                 Text("가상 HiDPI 전환 시 화면이 1~2초 깜빡일 수 있습니다.")

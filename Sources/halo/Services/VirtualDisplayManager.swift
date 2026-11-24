@@ -124,11 +124,8 @@ final class VirtualDisplayManager {
             onComplete(false, "기존 미러링 구성을 확인할 수 없어 안전하게 중단했습니다.")
             return
         }
-        let width = Double(physicalDisplay.logicalWidth)
-        let height = Double(physicalDisplay.logicalHeight)
-        let fit = min(1, (isPortrait ? 1440 : 2560) / width, (isPortrait ? 2560 : 1440) / height)
-        let baseW = max(1, Int(width * fit))
-        let baseH = max(1, Int(height * fit))
+        let (baseW, baseH) = Self.mirrorBaseSize(width: physicalDisplay.logicalWidth,
+                                                 height: physicalDisplay.logicalHeight)
         let hz = physicalDisplay.refreshRate > 0 ? physicalDisplay.refreshRate : 60
 
         let maxWidth = min(baseW * 2, isPortrait ? 2880 : 5120)
@@ -165,7 +162,18 @@ final class VirtualDisplayManager {
 
         mirrors[created.id] = MirrorRequest(physicalUUID: identity, previousMaster: previous,
                                             previousMasterUUID: previousUUID, completion: onComplete)
-        awaitMirror(id: created.id, modes: modeSpecs, attempts: 20)
+        // Succeeds as soon as the mirror settles; the budget only bounds slow display reconfigurations.
+        awaitMirror(id: created.id, modes: modeSpecs, attempts: 50)
+    }
+
+    /// Fits the physical logical size into a 2560×1440 box (1440×2560 in portrait), keeping the aspect ratio.
+    /// Both sides are even so the 2× framebuffer and every derived mode stay on whole pixel pairs.
+    nonisolated static func mirrorBaseSize(width: Int, height: Int) -> (width: Int, height: Int) {
+        let w = Double(width), h = Double(height)
+        let portrait = height > width
+        let fit = min(1, (portrait ? 1440 : 2560) / w, (portrait ? 2560 : 1440) / h)
+        func even(_ value: Double) -> Int { max(2, Int((value / 2).rounded()) * 2) }
+        return (even(w * fit), even(h * fit))
     }
 
     private func awaitMirror(id: UUID, modes: [LDVirtualDisplayModeSpec], attempts: Int) {

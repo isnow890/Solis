@@ -58,7 +58,15 @@
 2. Drag **halo.app** into `/Applications`.
 3. Open **halo.app** from Applications. For an older download labeled *Ad-Hoc Signed Build*, see the first-launch instructions on its release page.
 
-### Option 2: Build from Source
+### Option 2: Homebrew
+
+```bash
+brew install --cask isnow890/tap/halo
+```
+
+If Homebrew refuses the third-party tap, run `brew trust isnow890/tap` first. The cask is updated by hand after each release, so it can lag behind the latest version for a short while.
+
+### Option 3: Build from Source
 
 Requires macOS 14+ (Apple Silicon) and Xcode Command Line Tools (`swift`).
 

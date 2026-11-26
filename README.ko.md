@@ -58,7 +58,15 @@
 2. **halo.app**을 `/Applications` 폴더로 드래그합니다.
 3. 응용 프로그램에서 **halo.app**을 엽니다. 이전에 받은 파일의 릴리즈 설명에 *Ad-Hoc Signed Build*라고 적혀 있으면 해당 릴리즈의 최초 실행 안내를 따르세요.
 
-### 방법 2: 소스에서 직접 빌드
+### 방법 2: Homebrew
+
+```bash
+brew install --cask isnow890/tap/halo
+```
+
+Homebrew가 외부 tap을 거부하면 먼저 `brew trust isnow890/tap`을 실행하세요. cask는 릴리즈 후 수동으로 갱신하므로 최신 버전보다 잠시 늦을 수 있습니다.
+
+### 방법 3: 소스에서 직접 빌드
 
 macOS 14+ (Apple Silicon) 및 Xcode Command Line Tools(`swift`)가 필요합니다.
 

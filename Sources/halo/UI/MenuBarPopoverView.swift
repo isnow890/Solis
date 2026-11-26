@@ -13,10 +13,13 @@ struct MenuBarPopoverView: View {
     @State private var confirmationHeight: CGFloat = 0
 
     var body: some View {
-        let available = max(1, controller.popoverAvailableHeight - (controller.pendingModeRevert == nil ? 0 : confirmationHeight))
+        // The confirmation normally sits inside the card whose resolution changed; this top banner is the
+        // fallback for when that card's resolution list is not on screen (collapsed card or settings panel).
+        let topRevert = controller.pendingModeRevert.flatMap { inlineRevertDisplayID(for: $0) == nil ? $0 : nil }
+        let available = max(1, controller.popoverAvailableHeight - (topRevert == nil ? 0 : confirmationHeight))
         let needsScroll = contentHeight > available
         VStack(spacing: 0) {
-            if let revert = controller.pendingModeRevert {
+            if let revert = topRevert {
                 VStack(spacing: 0) {
                     modeRevertBanner(revert)
                     Divider()
@@ -122,32 +125,19 @@ struct MenuBarPopoverView: View {
     // MARK: - Mode Revert Safety Banner (P1-7)
 
     private func modeRevertBanner(_ revert: PendingModeRevert) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "arrow.uturn.backward.circle.fill")
-                .foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("\(revert.displayName) 해상도 변경됨")
-                    .font(.caption.weight(.semibold))
-                Text(revert.secondsRemaining > 0 ? "\(revert.secondsRemaining)초 후 이전 해상도로 돌아갑니다." : "복구에 실패했습니다. 되돌리기를 다시 시도하세요.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 4)
-            Button("되돌리기") {
-                controller.revertPendingMode()
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            Button("유지") {
-                controller.keepPendingMode()
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .disabled(revert.secondsRemaining == 0)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.orange.opacity(0.12))
+        ModeRevertPrompt(revert: revert, title: "\(revert.displayName) 해상도 변경됨",
+                         onRevert: controller.revertPendingMode, onKeep: controller.keepPendingMode)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.orange.opacity(0.12))
+    }
+
+    /// The physical display card that currently shows the confirmation next to its resolution list, if any.
+    private func inlineRevertDisplayID(for revert: PendingModeRevert) -> CGDirectDisplayID? {
+        guard !controller.showSettingsInPopover, let expanded = expandedDisplayID,
+              controller.visibleDisplays.contains(where: { $0.id == expanded }) else { return nil }
+        let modeSourceID = controller.mirroredVirtualDisplay(for: expanded)?.id ?? expanded
+        return modeSourceID == revert.displayID ? expanded : nil
     }
 
     // MARK: - Status Banner (P0-2)
@@ -293,6 +283,9 @@ struct MenuBarPopoverView: View {
                         keyTargetMode: controller.keyTargetMode,
                         mirrorState: controller.mirrorState(for: display.id),
                         previewPending: controller.pendingModeRevert != nil,
+                        pendingRevert: controller.pendingModeRevert.flatMap {
+                            inlineRevertDisplayID(for: $0) == display.id ? $0 : nil
+                        },
                         isExpanded: expandedDisplayID == display.id,
                         onHoverChange: { hovering in
                             if hovering {
@@ -320,7 +313,9 @@ struct MenuBarPopoverView: View {
                         },
                         onExportOverride: {
                             controller.exportDisplayOverridePlist(for: display)
-                        }
+                        },
+                        onRevertMode: controller.revertPendingMode,
+                        onKeepMode: controller.keepPendingMode
                     )
                 }
             }
@@ -577,6 +572,7 @@ private struct DisplayCardView: View {
     let keyTargetMode: BrightnessKeyTargetMode
     let mirrorState: VirtualMirrorState
     let previewPending: Bool
+    let pendingRevert: PendingModeRevert?
     let isExpanded: Bool
 
     let onHoverChange: (Bool) -> Void
@@ -586,6 +582,8 @@ private struct DisplayCardView: View {
     let onModeSelect: (DisplayModeItem) -> Void
     let onToggleVirtualHiDPI: () -> Void
     let onExportOverride: () -> Void
+    let onRevertMode: () -> Void
+    let onKeepMode: () -> Void
 
     @State private var hiDPIOnly: Bool = true
     @State private var showAdvancedDrawer: Bool = false
@@ -840,6 +838,15 @@ private struct DisplayCardView: View {
                     }
                     .frame(height: min(150, CGFloat(filteredModes.count) * 27))
 
+                    // Keep / revert sits right under the list the user just clicked in.
+                    if let pendingRevert {
+                        ModeRevertPrompt(revert: pendingRevert, title: "해상도 변경됨",
+                                         onRevert: onRevertMode, onKeep: onKeepMode)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+                    }
+
                     // Advanced disclosure for external physical displays (P0-4, P1-4)
                     if !display.isBuiltIn && !display.isVirtual {
                         DisclosureGroup(isExpanded: $showAdvancedDrawer) {
@@ -924,5 +931,37 @@ private struct DisplayCardView: View {
                 in: Capsule()
             )
             .foregroundStyle(filled ? .white : color)
+    }
+}
+
+// MARK: - Resolution Change Confirmation
+
+/// Countdown with 되돌리기 / 유지, shared by the in-card prompt and the top fallback banner.
+private struct ModeRevertPrompt: View {
+    let revert: PendingModeRevert
+    let title: String
+    let onRevert: () -> Void
+    let onKeep: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.uturn.backward.circle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                Text(revert.secondsRemaining > 0 ? "\(revert.secondsRemaining)초 후 이전 해상도로 돌아갑니다." : "복구에 실패했습니다. 되돌리기를 다시 시도하세요.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 4)
+            Button("되돌리기", action: onRevert)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            Button("유지", action: onKeep)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(revert.secondsRemaining == 0)
+        }
     }
 }

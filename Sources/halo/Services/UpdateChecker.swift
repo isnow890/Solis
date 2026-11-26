@@ -144,7 +144,7 @@ final class UpdateChecker: ObservableObject {
     func checkManually() {
         guard running else { return }
         guard installed != nil else {
-            manualMessage = "앱 번들의 버전 정보를 읽을 수 없습니다."
+            manualMessage = L("앱 번들의 버전 정보를 읽을 수 없습니다.", "Could not read the version from the app bundle.")
             return
         }
         manualMessage = nil
@@ -169,19 +169,19 @@ final class UpdateChecker: ObservableObject {
                 case 404:
                     available = nil
                     defaults.removeObject(forKey: Key.cachedTag)
-                    if manualRequested { manualMessage = "공개된 halo 릴리즈를 찾지 못했습니다." }
+                    if manualRequested { manualMessage = L("공개된 halo 릴리즈를 찾지 못했습니다.", "No published halo release was found.") }
                 case 200:
                     let tag = try JSONDecoder().decode(Payload.self, from: data).tag_name
                     guard let version = ReleaseVersion(tag) else { throw URLError(.cannotParseResponse) }
                     defaults.set(tag, forKey: Key.cachedTag)
                     present(tag, version: version)
-                    if manualRequested && available == nil { manualMessage = "현재 최신 버전을 사용 중입니다." }
+                    if manualRequested && available == nil { manualMessage = L("현재 최신 버전을 사용 중입니다.", "You are on the latest version.") }
                 default:
                     throw URLError(.badServerResponse)
                 }
             } catch {
                 guard !Task.isCancelled else { return }
-                if manualRequested { manualMessage = "업데이트를 확인하지 못했습니다. 잠시 후 다시 시도하세요." }
+                if manualRequested { manualMessage = L("업데이트를 확인하지 못했습니다. 잠시 후 다시 시도하세요.", "Could not check for updates. Please try again later.") }
             }
             manualRequested = false
             checking = false

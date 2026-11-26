@@ -13,28 +13,28 @@ enum BrightnessBackend: String, CaseIterable, Codable, Identifiable {
     /// Unified user-facing label used across menus and tooltips.
     var displayName: String {
         switch self {
-        case .native: return "하드웨어"
-        case .ddc: return "모니터(DDC)"
-        case .softwareOverlay: return "소프트웨어 디밍"
-        case .softwareGamma: return "감마 디밍"
+        case .native: return L("하드웨어", "Hardware")
+        case .ddc: return L("모니터(DDC)", "Monitor (DDC)")
+        case .softwareOverlay: return L("소프트웨어 디밍", "Software dimming")
+        case .softwareGamma: return L("감마 디밍", "Gamma dimming")
         }
     }
 
     var shortLabel: String {
         switch self {
-        case .native: return "하드웨어"
+        case .native: return L("하드웨어", "Hardware")
         case .ddc: return "DDC"
-        case .softwareOverlay: return "소프트웨어"
-        case .softwareGamma: return "감마"
+        case .softwareOverlay: return L("소프트웨어", "Software")
+        case .softwareGamma: return L("감마", "Gamma")
         }
     }
 
     var descriptionText: String {
         switch self {
-        case .native: return "macOS 기본 백라이트 제어"
-        case .ddc: return "모니터 자체 백라이트 직접 제어"
-        case .softwareOverlay: return "반투명 오버레이로 화면 어둡게 표시"
-        case .softwareGamma: return "색상 테이블(LUT) 조절로 화면 어둡게 표시"
+        case .native: return L("macOS 기본 백라이트 제어", "macOS native backlight control")
+        case .ddc: return L("모니터 자체 백라이트 직접 제어", "Controls the monitor's own backlight")
+        case .softwareOverlay: return L("반투명 오버레이로 화면 어둡게 표시", "Darkens the screen with a translucent overlay")
+        case .softwareGamma: return L("색상 테이블(LUT) 조절로 화면 어둡게 표시", "Darkens the screen by adjusting the color table (LUT)")
         }
     }
 }
@@ -48,9 +48,9 @@ enum BrightnessKeyTargetMode: String, CaseIterable, Codable, Identifiable {
 
     var title: String {
         switch self {
-        case .mouseCursor: return "마우스 위치"
-        case .allDisplays: return "모든 화면"
-        case .mainDisplay: return "메인 화면"
+        case .mouseCursor: return L("마우스 위치", "Cursor")
+        case .allDisplays: return L("모든 화면", "All Displays")
+        case .mainDisplay: return L("메인 화면", "Main Display")
         }
     }
 
@@ -129,7 +129,7 @@ struct DisplayModeItem: Identifiable, Hashable {
     }
 
     static func label(for rate: Double) -> String {
-        guard rate.isFinite, rate > 0 else { return "주사율 미보고" }
+        guard rate.isFinite, rate > 0 else { return L("주사율 미보고", "Refresh rate not reported") }
         return rate.formatted(.number.precision(.fractionLength(0...2))) + "Hz"
     }
 
@@ -167,7 +167,7 @@ struct DisplayItem: Identifiable {
     var brightness: Double
     var activeBackend: BrightnessBackend
     var supportedBackends: [BrightnessBackend]
-    var ddcUserStatus = "확인 중"
+    var ddcUserStatus = L("확인 중", "Checking")
     var ddcTechnicalDetail = ""
     var awaitingPreferredDDC = false
     var ddcReadable = false
@@ -213,6 +213,10 @@ enum VirtualDisplayPreset: String, CaseIterable, Identifiable {
     case portrait9x16 = "9:16 (세로 HiDPI)"
 
     var id: String { rawValue }
+
+    var label: String {
+        self == .portrait9x16 ? L("9:16 (세로 HiDPI)", "9:16 (Portrait HiDPI)") : rawValue
+    }
 
     var maxPixels: (width: Int, height: Int) {
         switch self {

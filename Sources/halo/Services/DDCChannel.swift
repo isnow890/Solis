@@ -14,10 +14,10 @@ struct DDCReading {
 
     var description: String {
         switch result {
-        case .valid: return "확인됨 (\(current)/\(maximum))"
-        case .unsupported: return "VCP 미지원"
-        case .invalidReply: return "유효하지 않은 응답"
-        default: return "전송 오류"
+        case .valid: return L("확인됨 (\(current)/\(maximum))", "verified (\(current)/\(maximum))")
+        case .unsupported: return L("VCP 미지원", "VCP not supported")
+        case .invalidReply: return L("유효하지 않은 응답", "invalid reply")
+        default: return L("전송 오류", "transfer error")
         }
     }
 

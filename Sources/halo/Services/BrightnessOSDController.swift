@@ -38,7 +38,7 @@ private struct BrightnessOSDView: View {
                     .foregroundStyle(.primary.opacity(0.92))
                     .frame(width: 44, height: 44)
 
-                Text("디스플레이 위치 확인")
+                Text(L("디스플레이 위치 확인", "Identifying display"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -169,7 +169,7 @@ final class BrightnessOSDController {
         }
 
         presentPanel(on: screen, displayID: displayID, generation: currentGeneration, duration: warningBadge == nil ? 1.05 : 1.8)
-        announceForVoiceOver("\(displayName) 밝기 \(Int((clamped * 100).rounded()))퍼센트" + (warningBadge.map { ", \($0)" } ?? ""))
+        announceForVoiceOver(L("\(displayName) 밝기 \(Int((clamped * 100).rounded()))퍼센트", "\(displayName) brightness \(Int((clamped * 100).rounded())) percent") + (warningBadge.map { ", \($0)" } ?? ""))
     }
 
     func showIdentify(displayID: CGDirectDisplayID, displayName: String) {

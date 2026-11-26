@@ -54,15 +54,15 @@ struct MenuBarPopoverView: View {
             if let release = updates.available {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        Text("halo \(release.version) 업데이트")
+                        Text(L("halo \(release.version) 업데이트", "halo \(release.version) is available"))
                             .font(.caption.weight(.semibold))
                         Spacer()
-                        Link("릴리즈 열기", destination: release.url)
+                        Link(L("릴리즈 열기", "Open Release"), destination: release.url)
                             .font(.caption.weight(.medium))
                     }
                     HStack(spacing: 6) {
-                        Button("나중에", action: updates.dismissForSession)
-                        Button("이 버전 건너뛰기", action: updates.skip)
+                        Button(L("나중에", "Later"), action: updates.dismissForSession)
+                        Button(L("이 버전 건너뛰기", "Skip This Version"), action: updates.skip)
                     }
                     .controlSize(.mini)
                 }
@@ -77,7 +77,7 @@ struct MenuBarPopoverView: View {
                     Spacer()
                     Button { updates.manualMessage = nil } label: { Image(systemName: "xmark") }
                         .buttonStyle(.borderless)
-                        .accessibilityLabel("업데이트 알림 닫기")
+                        .accessibilityLabel(L("업데이트 알림 닫기", "Dismiss update notice"))
                 }
                 .padding(10)
                 Divider()
@@ -115,8 +115,8 @@ struct MenuBarPopoverView: View {
                     .foregroundStyle(controller.showSettingsInPopover ? Color.accentColor : .secondary)
             }
             .buttonStyle(.borderless)
-            .help("설정")
-            .accessibilityLabel("설정")
+            .help(L("설정", "Settings"))
+            .accessibilityLabel(L("설정", "Settings"))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -125,7 +125,7 @@ struct MenuBarPopoverView: View {
     // MARK: - Mode Revert Safety Banner (P1-7)
 
     private func modeRevertBanner(_ revert: PendingModeRevert) -> some View {
-        ModeRevertPrompt(revert: revert, title: "\(revert.displayName) 해상도 변경됨",
+        ModeRevertPrompt(revert: revert, title: L("\(revert.displayName) 해상도 변경됨", "\(revert.displayName) resolution changed"),
                          onRevert: controller.revertPendingMode, onKeep: controller.keepPendingMode)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -179,7 +179,7 @@ struct MenuBarPopoverView: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.borderless)
-                .accessibilityLabel("알림 닫기")
+                .accessibilityLabel(L("알림 닫기", "Dismiss notice"))
             }
         }
         .padding(.horizontal, 12)
@@ -191,33 +191,33 @@ struct MenuBarPopoverView: View {
 
     private var accessibilityTitle: String {
         if controller.needsPermissionRelaunch {
-            return "키보드 밝기 키 연결 대기"
+            return L("키보드 밝기 키 연결 대기", "Waiting for brightness keys to connect")
         }
         if controller.needsAdditionalPermission {
-            return "키보드 이벤트 제어 권한 필요"
+            return L("키보드 이벤트 제어 권한 필요", "Keyboard event permission needed")
         }
-        return controller.didRequestBrightnessPermission ? "키보드 밝기 키 권한 확인 중" : "키보드 밝기 키 권한 필요"
+        return controller.didRequestBrightnessPermission ? L("키보드 밝기 키 권한 확인 중", "Checking brightness key permission") : L("키보드 밝기 키 권한 필요", "Brightness key permission needed")
     }
 
     private var accessibilityHelp: String {
         if controller.needsPermissionRelaunch {
-            return "권한은 켜져 있지만 연결이 갱신되지 않았습니다. 앱을 재시작하거나, 설정에서 기존 halo를 (−)로 삭제 후 다시 허용해 주세요."
+            return L("권한은 켜져 있지만 연결이 갱신되지 않았습니다. 앱을 재시작하거나, 설정에서 기존 halo를 (−)로 삭제 후 다시 허용해 주세요.", "Permission is on, but the connection has not refreshed. Restart the app, or remove halo with (−) in Settings and allow it again.")
         }
         if controller.needsAdditionalPermission {
-            return "손쉬운 사용은 허용되었지만 키보드 이벤트 제어 권한이 아직 필요합니다. 설정에서 halo의 권한을 확인해 주세요."
+            return L("손쉬운 사용은 허용되었지만 키보드 이벤트 제어 권한이 아직 필요합니다. 설정에서 halo의 권한을 확인해 주세요.", "Accessibility is allowed, but keyboard event permission is still needed. Check halo's permissions in Settings.")
         }
         if controller.didRequestBrightnessPermission {
-            return "설정에서 halo를 허용하세요. 이미 켜져 있다면 기존 halo를 −로 제거한 뒤 +로 현재 앱을 추가하고 다시 허용하세요."
+            return L("설정에서 halo를 허용하세요. 이미 켜져 있다면 기존 halo를 −로 제거한 뒤 +로 현재 앱을 추가하고 다시 허용하세요.", "Allow halo in Settings. If it is already on, remove halo with −, add this app with +, and allow it again.")
         }
         return BrightnessKeyMonitor.permissionExplanation
     }
 
     private var permissionSettingsHint: String {
         if #available(macOS 27.3, *) {
-            return "개인정보 보호 및 보안에서 halo가 요청한 항목을 확인하세요."
+            return L("개인정보 보호 및 보안에서 halo가 요청한 항목을 확인하세요.", "Check the item halo requested under Privacy & Security.")
         }
-        if #available(macOS 27, *) { return "개인정보 보호 및 보안 > 기기 제어 및 데이터 접근" }
-        return "개인정보 보호 및 보안 > 손쉬운 사용"
+        if #available(macOS 27, *) { return L("개인정보 보호 및 보안 > 기기 제어 및 데이터 접근", "Privacy & Security > Device Control and Data Access") }
+        return L("개인정보 보호 및 보안 > 손쉬운 사용", "Privacy & Security > Accessibility")
     }
 
     private var accessibilityCallout: some View {
@@ -244,17 +244,17 @@ struct MenuBarPopoverView: View {
 
             HStack(spacing: 6) {
                 if controller.needsPermissionRelaunch {
-                    Button("앱 재시작", action: controller.relaunchApp)
+                    Button(L("앱 재시작", "Restart App"), action: controller.relaunchApp)
                         .buttonStyle(.borderedProminent)
-                    Button("설정 열기", action: controller.requestAccessibilityPermission)
+                    Button(L("설정 열기", "Open Settings"), action: controller.requestAccessibilityPermission)
                 } else if controller.needsAdditionalPermission || controller.didRequestBrightnessPermission {
-                    Button("설정 열기", action: controller.requestAccessibilityPermission)
+                    Button(L("설정 열기", "Open Settings"), action: controller.requestAccessibilityPermission)
                         .buttonStyle(.borderedProminent)
-                    Button("나중에") { controller.permissionBannerDeferred = true }
+                    Button(L("나중에", "Later")) { controller.permissionBannerDeferred = true }
                 } else {
-                    Button("권한 허용", action: controller.requestAccessibilityPermission)
+                    Button(L("권한 허용", "Allow"), action: controller.requestAccessibilityPermission)
                         .buttonStyle(.borderedProminent)
-                    Button("나중에") { controller.permissionBannerDeferred = true }
+                    Button(L("나중에", "Later")) { controller.permissionBannerDeferred = true }
                 }
             }
             .controlSize(.small)
@@ -329,7 +329,7 @@ struct MenuBarPopoverView: View {
     private var keyTargetStrip: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
-                Label("키보드 밝기 대상", systemImage: "keyboard")
+                Label(L("키보드 밝기 대상", "Brightness key target"), systemImage: "keyboard")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -338,7 +338,7 @@ struct MenuBarPopoverView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Picker("키보드 밝기 대상", selection: $controller.keyTargetMode) {
+            Picker(L("키보드 밝기 대상", "Brightness key target"), selection: $controller.keyTargetMode) {
                 ForEach(BrightnessKeyTargetMode.allCases) { mode in
                     Text(mode.title).tag(mode)
                 }
@@ -348,10 +348,10 @@ struct MenuBarPopoverView: View {
             .disabled(!controller.isAccessibilityGranted)
             if !controller.isAccessibilityGranted {
                 HStack {
-                    Text("밝기 키 연결 후 대상을 선택할 수 있습니다.")
+                    Text(L("밝기 키 연결 후 대상을 선택할 수 있습니다.", "You can choose a target once the brightness keys are connected."))
                     Spacer()
                     if controller.permissionBannerDeferred {
-                        Button("권한 안내") { controller.permissionBannerDeferred = false }
+                        Button(L("권한 안내", "Permission Help")) { controller.permissionBannerDeferred = false }
                             .buttonStyle(.link)
                     }
                 }
@@ -362,7 +362,7 @@ struct MenuBarPopoverView: View {
     }
 
     private var shortcutSummaryText: String {
-        let base = controller.captureStandardKeys ? "F1/F2" : "밝기 키"
+        let base = controller.captureStandardKeys ? "F1/F2" : L("밝기 키", "Brightness keys")
         return controller.captureCtrlOptionArrows ? "\(base) · ⌃⌥↑↓" : base
     }
 
@@ -370,7 +370,7 @@ struct MenuBarPopoverView: View {
 
     private var settingsPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("설정")
+            Text(L("설정", "Settings"))
                 .font(.callout.weight(.semibold))
 
             VStack(alignment: .leading, spacing: 6) {
@@ -379,9 +379,9 @@ struct MenuBarPopoverView: View {
                     set: { controller.setLaunchAtLogin($0) }
                 )) {
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("로그인 시 자동 실행")
+                        Text(L("로그인 시 자동 실행", "Launch at Login"))
                             .font(.callout)
-                        Text("macOS 시작 시 상단 메뉴바에 자동으로 실행합니다.")
+                        Text(L("macOS 시작 시 상단 메뉴바에 자동으로 실행합니다.", "Starts in the menu bar when you log in."))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -394,11 +394,11 @@ struct MenuBarPopoverView: View {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.caption2)
                             .foregroundStyle(.orange)
-                        Text("승인 대기 · 로그인 항목에서 halo를 켜주세요")
+                        Text(L("승인 대기 · 로그인 항목에서 halo를 켜주세요", "Awaiting approval · turn on halo in Login Items"))
                             .font(.caption2)
                             .foregroundStyle(.primary)
                         Spacer()
-                        Button("열기", action: controller.openLoginSettings)
+                        Button(L("열기", "Open"), action: controller.openLoginSettings)
                             .buttonStyle(.bordered)
                             .controlSize(.mini)
                     }
@@ -411,25 +411,25 @@ struct MenuBarPopoverView: View {
             HStack(alignment: .center, spacing: 8) {
                 Toggle(isOn: $updates.automaticallyChecks) {
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("업데이트 자동 확인")
+                        Text(L("업데이트 자동 확인", "Check for updates automatically"))
                             .font(.callout)
-                        Text("하루 1회 GitHub에서 최신 버전 번호만 조회합니다.")
+                        Text(L("하루 1회 GitHub에서 최신 버전 번호만 조회합니다.", "Looks up only the latest version number on GitHub once a day."))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                 }
                 .toggleStyle(.switch)
                 Spacer(minLength: 4)
-                Button(updates.checking ? "확인 중…" : "지금 확인", action: updates.checkManually)
+                Button(updates.checking ? L("확인 중…", "Checking…") : L("지금 확인", "Check Now"), action: updates.checkManually)
                     .disabled(updates.checking)
             }
             .controlSize(.small)
 
             Toggle(isOn: $controller.captureStandardKeys) {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("표준 F1 / F2로 밝기 조절")
+                    Text(L("표준 F1 / F2로 밝기 조절", "Use standard F1 / F2 for brightness"))
                         .font(.callout)
-                    Text("켜면 다른 앱의 F1/F2 단축키 대신 halo 밝기 조절이 동작합니다.")
+                    Text(L("켜면 다른 앱의 F1/F2 단축키 대신 halo 밝기 조절이 동작합니다.", "When on, F1/F2 adjust brightness in halo instead of acting as shortcuts in other apps."))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -439,9 +439,9 @@ struct MenuBarPopoverView: View {
 
             Toggle(isOn: $controller.captureCtrlOptionArrows) {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("⌃⌥↑ / ⌃⌥↓ 대체 단축키 사용")
+                    Text(L("⌃⌥↑ / ⌃⌥↓ 대체 단축키 사용", "Use ⌃⌥↑ / ⌃⌥↓ as alternate shortcuts"))
                         .font(.callout)
-                    Text("밝기 키가 없는 외장 키보드용 옵션입니다 (기본 꺼짐).")
+                    Text(L("밝기 키가 없는 외장 키보드용 옵션입니다 (기본 꺼짐).", "For external keyboards without brightness keys (off by default)."))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -451,9 +451,9 @@ struct MenuBarPopoverView: View {
 
             Toggle(isOn: $controller.cleanupVirtualOnQuit) {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("종료 시 기존 미러 구성 복구")
+                    Text(L("종료 시 기존 미러 구성 복구", "Restore mirroring setup on quit"))
                         .font(.callout)
-                    Text("가상 화면은 앱 종료 시 사라지며, 켜면 이전 미러 배치를 명시적으로 복원합니다.")
+                    Text(L("가상 화면은 앱 종료 시 사라지며, 켜면 이전 미러 배치를 명시적으로 복원합니다.", "Virtual displays disappear when the app quits. When on, the previous mirroring layout is restored explicitly."))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -466,7 +466,7 @@ struct MenuBarPopoverView: View {
             // Standalone Virtual Display moved into Advanced inside Settings (P0-5)
             DisclosureGroup(isExpanded: $showStandaloneVirtualSection) {
                 VStack(alignment: .leading, spacing: 7) {
-                    Text("보이지 않는 확장 화면이 추가됩니다 (화면 녹화·스트리밍·테스트용).")
+                    Text(L("보이지 않는 확장 화면이 추가됩니다 (화면 녹화·스트리밍·테스트용).", "Adds an invisible extended display (for screen recording, streaming, or testing)."))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
 
@@ -477,7 +477,7 @@ struct MenuBarPopoverView: View {
                                     VStack(alignment: .leading, spacing: 1) {
                                         Text(v.name)
                                             .font(.caption.weight(.medium))
-                                        Text("최대 \(v.maxWidth)×\(v.maxHeight)")
+                                        Text(L("최대 \(v.maxWidth)×\(v.maxHeight)", "Up to \(v.maxWidth)×\(v.maxHeight)"))
                                             .font(.caption2)
                                             .foregroundStyle(.secondary)
                                     }
@@ -489,7 +489,7 @@ struct MenuBarPopoverView: View {
                                             .font(.caption)
                                     }
                                     .buttonStyle(.borderless)
-                                    .accessibilityLabel("\(v.name) 제거")
+                                    .accessibilityLabel(L("\(v.name) 제거", "Remove \(v.name)"))
                                 }
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 5)
@@ -499,15 +499,15 @@ struct MenuBarPopoverView: View {
                     }
 
                     HStack(spacing: 8) {
-                        Picker("비율", selection: $selectedPreset) {
+                        Picker(L("비율", "Aspect ratio"), selection: $selectedPreset) {
                             ForEach(VirtualDisplayPreset.allCases) { preset in
-                                Text(preset.rawValue).tag(preset)
+                                Text(preset.label).tag(preset)
                             }
                         }
                         .labelsHidden()
                         .controlSize(.small)
 
-                        Button("추가") {
+                        Button(L("추가", "Add")) {
                             controller.createStandaloneVirtualDisplay(preset: selectedPreset)
                         }
                         .buttonStyle(.bordered)
@@ -516,32 +516,32 @@ struct MenuBarPopoverView: View {
                 }
                 .padding(.top, 6)
             } label: {
-                Text("고급 · 독립 가상 디스플레이")
+                Text(L("고급 · 독립 가상 디스플레이", "Advanced · Standalone virtual display"))
                     .font(.caption.weight(.semibold))
             }
 
             Divider()
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("단축키")
+                Text(L("단축키", "Shortcuts"))
                     .font(.caption.weight(.semibold))
-                shortcutRow("☀ 밝기 키 · F14 / F15", "대상 화면 밝기 조절")
-                shortcutRow("표준 F1 / F2", controller.captureStandardKeys ? "halo에서 사용 중" : "비활성")
-                shortcutRow("⌥⇧ 밝기 키", "1/64 단위 미세 밝기 조절")
-                shortcutRow("⌃⌥↑ / ⌃⌥↓", controller.captureCtrlOptionArrows ? "외장 키보드 대체 키" : "비활성")
+                shortcutRow(L("☀ 밝기 키 · F14 / F15", "☀ keys · F14 / F15"), L("대상 화면 밝기 조절", "Adjust target display brightness"))
+                shortcutRow(L("표준 F1 / F2", "Standard F1 / F2"), controller.captureStandardKeys ? L("halo에서 사용 중", "Used by halo") : L("비활성", "Off"))
+                shortcutRow(L("⌥⇧ 밝기 키", "⌥⇧ + ☀ keys"), L("1/64 단위 미세 밝기 조절", "Fine 1/64-step brightness"))
+                shortcutRow("⌃⌥↑ / ⌃⌥↓", controller.captureCtrlOptionArrows ? L("외장 키보드 대체 키", "Alternate keys for external keyboards") : L("비활성", "Off"))
             }
 
             Divider()
 
             HStack {
-                Button("권한 설정 열기") {
+                Button(L("권한 설정 열기", "Open Permission Settings")) {
                     controller.requestAccessibilityPermission()
                 }
                 .controlSize(.small)
 
                 Spacer()
 
-                Button("halo 종료") {
+                Button(L("halo 종료", "Quit halo")) {
                     NSApp.terminate(nil)
                 }
                 .controlSize(.small)
@@ -603,8 +603,8 @@ private struct DisplayCardView: View {
     private var targetBadgeText: String? {
         guard isKeyTarget else { return nil }
         switch keyTargetMode {
-        case .mouseCursor: return "키 대상"
-        case .mainDisplay: return "키 대상"
+        case .mouseCursor: return L("키 대상", "Key target")
+        case .mainDisplay: return L("키 대상", "Key target")
         case .allDisplays: return nil
         }
     }
@@ -628,10 +628,10 @@ private struct DisplayCardView: View {
                             pillBadge(badge, color: .accentColor, filled: true)
                         }
                         if display.isMain && keyTargetMode != .mainDisplay {
-                            pillBadge("메인", color: .secondary, filled: false)
+                            pillBadge(L("메인", "Main"), color: .secondary, filled: false)
                         }
                         if mirrorState.isActive {
-                            pillBadge("가상 HiDPI", color: .accentColor, filled: false)
+                            pillBadge(L("가상 HiDPI", "Virtual HiDPI"), color: .accentColor, filled: false)
                         }
                     }
 
@@ -645,7 +645,7 @@ private struct DisplayCardView: View {
                 // Resolution & Advanced drawer toggle (P1-4)
                 Button(action: onToggleExpand) {
                     HStack(spacing: 3) {
-                        Text("해상도")
+                        Text(L("해상도", "Resolution"))
                             .font(.caption2.weight(.medium))
                         Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                             .font(.caption2.weight(.semibold))
@@ -659,7 +659,7 @@ private struct DisplayCardView: View {
                     .foregroundStyle(isExpanded ? Color.accentColor : .primary)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(display.name) 해상도 설정")
+                .accessibilityLabel(L("\(display.name) 해상도 설정", "\(display.name) resolution settings"))
             }
             .contentShape(Rectangle())
             .onHover { hovering in
@@ -682,8 +682,8 @@ private struct DisplayCardView: View {
                 )
                 .controlSize(.small)
                 .disabled(display.awaitingPreferredDDC)
-                .accessibilityLabel("\(display.name) 밝기")
-                .accessibilityValue("\(Int((display.brightness * 100).rounded()))퍼센트")
+                .accessibilityLabel(L("\(display.name) 밝기", "\(display.name) brightness"))
+                .accessibilityValue(L("\(Int((display.brightness * 100).rounded()))퍼센트", "\(Int((display.brightness * 100).rounded())) percent"))
 
                 Text("\(Int((display.brightness * 100).rounded()))%")
                     .font(.caption.weight(.medium))
@@ -713,7 +713,7 @@ private struct DisplayCardView: View {
                 .menuStyle(.borderlessButton)
                 .fixedSize()
                 .help(backendTooltip)
-                .accessibilityLabel("\(display.name) 밝기 제어 방식: \(display.activeBackend.displayName)")
+                .accessibilityLabel(L("\(display.name) 밝기 제어 방식: \(display.activeBackend.displayName)", "\(display.name) brightness method: \(display.activeBackend.displayName)"))
             }
 
             // Inline error (P0-2)
@@ -731,7 +731,7 @@ private struct DisplayCardView: View {
 
             // Mirror overlay hint
             if display.isMirrored && display.activeBackend == .softwareOverlay {
-                Text("소프트웨어 디밍은 미러링된 화면에 함께 적용됩니다.")
+                Text(L("소프트웨어 디밍은 미러링된 화면에 함께 적용됩니다.", "Software dimming also applies to mirrored displays."))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -745,11 +745,11 @@ private struct DisplayCardView: View {
                     // Refresh rate Picker menu (P1-8: replaces hidden horizontal scroll)
                     if modeSourceDisplay.currentResolutionRefreshModes.count > 1 {
                         HStack {
-                            Text("주사율")
+                            Text(L("주사율", "Refresh rate"))
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(.secondary)
                             Spacer()
-                            Picker("주사율", selection: Binding(
+                            Picker(L("주사율", "Refresh rate"), selection: Binding(
                                 get: {
                                     modeSourceDisplay.currentResolutionRefreshModes.first(where: { $0.isCurrent })?.id
                                         ?? modeSourceDisplay.currentResolutionRefreshModes.first?.id
@@ -775,17 +775,17 @@ private struct DisplayCardView: View {
 
                     // Filter Header
                     HStack {
-                        Text(mirrorState.isActive ? "가상 HiDPI 해상도" : "해상도")
+                        Text(mirrorState.isActive ? L("가상 HiDPI 해상도", "Virtual HiDPI resolution") : L("해상도", "Resolution"))
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Spacer()
                         if hasNativeHiDPI {
-                            Toggle("HiDPI만", isOn: $hiDPIOnly)
+                            Toggle(L("HiDPI만", "HiDPI only"), isOn: $hiDPIOnly)
                                 .toggleStyle(.checkbox)
                                 .controlSize(.mini)
                                 .font(.caption2)
                         } else if !mirrorState.isActive {
-                            Text("네이티브 HiDPI 없음 · 아래 고급에서 가상 HiDPI 사용")
+                            Text(L("네이티브 HiDPI 없음 · 아래 고급에서 가상 HiDPI 사용", "No native HiDPI · see Advanced below"))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -840,7 +840,7 @@ private struct DisplayCardView: View {
 
                     // Keep / revert sits right under the list the user just clicked in.
                     if let pendingRevert {
-                        ModeRevertPrompt(revert: pendingRevert, title: "해상도 변경됨",
+                        ModeRevertPrompt(revert: pendingRevert, title: L("해상도 변경됨", "Resolution changed"),
                                          onRevert: onRevertMode, onKeep: onKeepMode)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 6)
@@ -857,13 +857,13 @@ private struct DisplayCardView: View {
                                             if mirrorState.isConnecting {
                                                 ProgressView()
                                                     .controlSize(.mini)
-                                                Text("가상 HiDPI 연결 취소")
+                                                Text(L("가상 HiDPI 연결 취소", "Cancel Virtual HiDPI"))
                                             } else if mirrorState.isActive {
                                                 Image(systemName: "rectangle.on.rectangle.slash")
-                                                Text("가상 HiDPI 미러링 해제")
+                                                Text(L("가상 HiDPI 미러링 해제", "Turn Off Virtual HiDPI"))
                                             } else {
                                                 Image(systemName: "rectangle.on.rectangle")
-                                                Text("가상 HiDPI 미러링 켜기")
+                                                Text(L("가상 HiDPI 미러링 켜기", "Turn On Virtual HiDPI"))
                                             }
                                         }
                                         .font(.caption.weight(.medium))
@@ -873,18 +873,18 @@ private struct DisplayCardView: View {
                                     .controlSize(.small)
                                     .disabled(previewPending && !mirrorState.isConnecting)
 
-                                    Button("설정 파일 저장", action: onExportOverride)
+                                    Button(L("설정 파일 저장", "Save Settings File"), action: onExportOverride)
                                         .buttonStyle(.bordered)
                                         .controlSize(.small)
-                                        .help("영구 네이티브 HiDPI용 macOS Display Override 파일을 데스크톱에 저장합니다. 저장된 DisplayVendorID-… 폴더를 /Library/Displays/Contents/Resources/Overrides/ 에 복사한 뒤 재시동해야 적용됩니다.")
+                                        .help(L("영구 네이티브 HiDPI용 macOS Display Override 파일을 데스크톱에 저장합니다. 저장된 DisplayVendorID-… 폴더를 /Library/Displays/Contents/Resources/Overrides/ 에 복사한 뒤 재시동해야 적용됩니다.", "Saves a macOS Display Override file for permanent native HiDPI to the Desktop. Copy the saved DisplayVendorID-… folder into /Library/Displays/Contents/Resources/Overrides/ and restart to apply it."))
                                 }
 
-                                Text("가상 HiDPI 전환 시 화면이 1~2초 깜빡일 수 있습니다.")
+                                Text(L("가상 HiDPI 전환 시 화면이 1~2초 깜빡일 수 있습니다.", "The screen may flicker for 1–2 seconds when switching virtual HiDPI."))
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
 
                                 if !display.ddcTechnicalDetail.isEmpty {
-                                    Text("모니터 직접 제어 · \(display.ddcUserStatus)")
+                                    Text(L("모니터 직접 제어 · \(display.ddcUserStatus)", "Direct monitor control · \(display.ddcUserStatus)"))
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                         .help(display.ddcTechnicalDetail)
@@ -892,7 +892,7 @@ private struct DisplayCardView: View {
                             }
                             .padding(.top, 4)
                         } label: {
-                            Text("고급 (가상 HiDPI · 설정 파일)")
+                            Text(L("고급 (가상 HiDPI · 설정 파일)", "Advanced (virtual HiDPI · settings file)"))
                                 .font(.caption2.weight(.medium))
                                 .foregroundStyle(.secondary)
                         }
@@ -950,15 +950,15 @@ private struct ModeRevertPrompt: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(.caption.weight(.semibold))
-                Text(revert.secondsRemaining > 0 ? "\(revert.secondsRemaining)초 후 이전 해상도로 돌아갑니다." : "복구에 실패했습니다. 되돌리기를 다시 시도하세요.")
+                Text(revert.secondsRemaining > 0 ? L("\(revert.secondsRemaining)초 후 이전 해상도로 돌아갑니다.", "Reverting to the previous resolution in \(revert.secondsRemaining)s.") : L("복구에 실패했습니다. 되돌리기를 다시 시도하세요.", "Could not revert. Try Revert again."))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 4)
-            Button("되돌리기", action: onRevert)
+            Button(L("되돌리기", "Revert"), action: onRevert)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-            Button("유지", action: onKeep)
+            Button(L("유지", "Keep"), action: onKeep)
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .disabled(revert.secondsRemaining == 0)

@@ -181,7 +181,7 @@ final class DisplayController: ObservableObject {
     private func announceConnectionIfVisible() {
         guard cursorPollTimer != nil, waitingForFirstConnection, keyStatus.ready, !announcedKeyConnection else { return }
         announcedKeyConnection = true
-        showBanner(.success, "키보드 밝기 키가 연결되었습니다 — 이제 밝기 키를 눌러 보세요.")
+        showBanner(.success, L("키보드 밝기 키가 연결되었습니다 — 이제 밝기 키를 눌러 보세요.", "Brightness keys are connected — try pressing one now."))
     }
 
     func requestAccessibilityPermission() {
@@ -204,7 +204,7 @@ final class DisplayController: ObservableObject {
         NSWorkspace.shared.openApplication(at: bundleURL, configuration: config) { [weak self] app, error in
             DispatchQueue.main.async {
                 guard app != nil, error == nil else {
-                    self?.showBanner(.error, error?.localizedDescription ?? "새 인스턴스를 시작하지 못했습니다.")
+                    self?.showBanner(.error, error?.localizedDescription ?? L("새 인스턴스를 시작하지 못했습니다.", "Could not start a new instance."))
                     return
                 }
                 NSApp.terminate(nil)
@@ -222,7 +222,7 @@ final class DisplayController: ObservableObject {
             }
             refreshLoginStatus()
         } catch {
-            showBanner(.error, "로그인 시 자동 실행을 변경하지 못했습니다: \(error.localizedDescription)")
+            showBanner(.error, L("로그인 시 자동 실행을 변경하지 못했습니다: \(error.localizedDescription)", "Could not change Launch at Login: \(error.localizedDescription)"))
             refreshLoginStatus()
         }
     }
@@ -330,7 +330,7 @@ final class DisplayController: ObservableObject {
                     return localized
                 }
                 if let old = previousByID[displayID], old.uuidString == uuidString { return old.name }
-                return isBuiltIn ? "내장 디스플레이" : "외장 디스플레이 \(displayID)"
+                return isBuiltIn ? L("내장 디스플레이", "Built-in Display") : L("외장 디스플레이 \(displayID)", "External Display \(displayID)")
             }()
 
             let mode = CGDisplayCopyDisplayMode(displayID)
@@ -412,7 +412,7 @@ final class DisplayController: ObservableObject {
                 brightness: min(max(initialBrightness, 0.0), 1.0),
                 activeBackend: activeBackend,
                 supportedBackends: supported,
-                ddcUserStatus: channels[displayID] == nil ? "확인 중" : (previous?.ddcUserStatus ?? "확인 중"),
+                ddcUserStatus: channels[displayID] == nil ? L("확인 중", "Checking") : (previous?.ddcUserStatus ?? L("확인 중", "Checking")),
                 ddcTechnicalDetail: previous?.ddcTechnicalDetail ?? "",
                 awaitingPreferredDDC: awaitingDDC,
                 ddcReadable: channels[displayID] != nil && previous?.ddcReadable == true,
@@ -435,7 +435,7 @@ final class DisplayController: ObservableObject {
                 softwareDimmer.setOverlayBrightness(item.brightness, for: displayID)
             } else if activeBackend == .softwareGamma && previous?.activeBackend != .softwareGamma {
                 if !softwareDimmer.setGammaBrightness(item.brightness, for: displayID) {
-                    item.inlineError = "저장된 감마 밝기를 적용하지 못했습니다."
+                    item.inlineError = L("저장된 감마 밝기를 적용하지 못했습니다.", "Could not apply the saved gamma brightness.")
                 }
             }
             builtItems.append(item)
@@ -457,8 +457,8 @@ final class DisplayController: ObservableObject {
         for item in displays where !item.isBuiltIn && !item.isVirtual {
             guard let port = ports[NSNumber(value: item.id)], LDIOAVServiceIsAvailable() else {
                 if let i = displays.firstIndex(where: { $0.id == item.id }) {
-                    displays[i].ddcUserStatus = "직접 제어 미지원"
-                    displays[i].ddcTechnicalDetail = "직접 제어용 외부 포트(AVService)를 찾지 못했습니다."
+                    displays[i].ddcUserStatus = L("직접 제어 미지원", "Direct control not supported")
+                    displays[i].ddcTechnicalDetail = L("직접 제어용 외부 포트(AVService)를 찾지 못했습니다.", "No external port (AVService) for direct control was found.")
                 }
                 continue
             }
@@ -482,8 +482,8 @@ final class DisplayController: ObservableObject {
             let wasWaiting = self.displays[i].awaitingPreferredDDC
             self.displays[i].awaitingPreferredDDC = false
             guard let reading else {
-                self.displays[i].ddcUserStatus = "직접 제어 미지원"
-                self.displays[i].ddcTechnicalDetail = "포트(\(channel.port))에서 DDC 통신 채널을 열지 못했습니다."
+                self.displays[i].ddcUserStatus = L("직접 제어 미지원", "Direct control not supported")
+                self.displays[i].ddcTechnicalDetail = L("포트(\(channel.port))에서 DDC 통신 채널을 열지 못했습니다.", "Could not open a DDC channel on port \(channel.port).")
                 if wasWaiting && self.displays[i].activeBackend == .softwareOverlay {
                     self.softwareDimmer.setOverlayBrightness(self.displays[i].brightness, for: item.id)
                 }
@@ -495,13 +495,13 @@ final class DisplayController: ObservableObject {
             guard !self.ddcInFlight.contains(item.id), self.inputVersion[item.id, default: 0] == version else { return }
             self.displays[i].ddcReadable = reading.fraction != nil
             if let fraction = reading.fraction {
-                self.displays[i].ddcUserStatus = "연결됨"
-                self.displays[i].ddcTechnicalDetail = "포트 \(channel.port) · \(reading.description)"
+                self.displays[i].ddcUserStatus = L("연결됨", "Connected")
+                self.displays[i].ddcTechnicalDetail = L("포트 \(channel.port) · \(reading.description)", "Port \(channel.port) · \(reading.description)")
                 self.displays[i].ddcMaxValue = reading.maximum
                 self.lastDDCLevel[item.id] = fraction
             } else {
-                self.displays[i].ddcUserStatus = "응답 없음"
-                self.displays[i].ddcTechnicalDetail = "포트 \(channel.port) · \(reading.description) (소프트웨어 디밍 권장)"
+                self.displays[i].ddcUserStatus = L("응답 없음", "No response")
+                self.displays[i].ddcTechnicalDetail = L("포트 \(channel.port) · \(reading.description) (소프트웨어 디밍 권장)", "Port \(channel.port) · \(reading.description) (software dimming recommended)")
             }
             let saved = self.loadPreferredBackend(uuid: channel.uuid)
             let useDDC = saved == .ddc || (saved == nil && reading.fraction != nil &&
@@ -530,7 +530,7 @@ final class DisplayController: ObservableObject {
         guard !isShuttingDown, !topologyChanging, value.isFinite,
               let idx = displays.firstIndex(where: { $0.id == displayID }) else { return }
         guard !displays[idx].awaitingPreferredDDC else {
-            setInlineError("모니터 직접 제어 연결을 확인하는 중입니다.", for: displayID)
+            setInlineError(L("모니터 직접 제어 연결을 확인하는 중입니다.", "Checking the direct monitor control connection."), for: displayID)
             return
         }
         let clamped = min(max(value, 0), 1)
@@ -559,12 +559,12 @@ final class DisplayController: ObservableObject {
         let id = item.id
         guard let channel = channels[id], let i = displays.firstIndex(where: { $0.id == id }) else { return }
         let requested = UInt16((level * Double(item.ddcMaxValue)).rounded())
-        displays[i].ddcUserStatus = "적용 중"
+        displays[i].ddcUserStatus = L("적용 중", "Applying")
         if lastDDCLevel[id] == nil { lastDDCLevel[id] = item.brightness }
         ddcInFlight.insert(id)
         let hudTicket = hudGeneration
         if showOSD {
-            let warn = item.ddcReadable ? "적용 중" : "응답 미확인"
+            let warn = item.ddcReadable ? L("적용 중", "Applying") : L("응답 미확인", "Unverified")
             osdController.show(displayID: item.id, displayName: hudTitle, warningBadge: warn, brightness: level)
         }
         channel.write(requested, verify: item.ddcReadable) { [weak self, weak channel] result in
@@ -576,28 +576,28 @@ final class DisplayController: ObservableObject {
             switch result {
             case .failed:
                 reported = self.lastDDCLevel[id] ?? item.brightness
-                self.displays[i].ddcUserStatus = "전송 실패"
-                self.displays[i].inlineError = "모니터 밝기 신호 전송에 실패했습니다. 소프트웨어 디밍으로 바꿔보세요."
-                warningBadge = "모니터 응답 없음"
+                self.displays[i].ddcUserStatus = L("전송 실패", "Send failed")
+                self.displays[i].inlineError = L("모니터 밝기 신호 전송에 실패했습니다. 소프트웨어 디밍으로 바꿔보세요.", "Could not send the brightness signal to the monitor. Try software dimming instead.")
+                warningBadge = L("모니터 응답 없음", "Monitor not responding")
             case .sent:
                 if !item.ddcReadable { self.lastDDCLevel[id] = level }
-                self.displays[i].ddcUserStatus = item.ddcReadable ? "확인 중" : "신호 전송됨 (미확인)"
+                self.displays[i].ddcUserStatus = item.ddcReadable ? L("확인 중", "Checking") : L("신호 전송됨 (미확인)", "Signal sent (unverified)")
             case .readback(let reading):
                 if let reading, let actual = reading.fraction {
                     self.lastDDCLevel[id] = actual
                     self.displays[i].ddcMaxValue = reading.maximum
                     reported = actual
-                    self.displays[i].ddcUserStatus = "연결됨"
-                    self.displays[i].ddcTechnicalDetail = "포트 \(channel.port) · \(reading.description)"
+                    self.displays[i].ddcUserStatus = L("연결됨", "Connected")
+                    self.displays[i].ddcTechnicalDetail = L("포트 \(channel.port) · \(reading.description)", "Port \(channel.port) · \(reading.description)")
                     if abs(level - actual) > 0.5 / Double(reading.maximum) + 1e-9 {
-                        warningBadge = "장치 밝기"
-                        self.displays[i].ddcUserStatus = "요청값과 다름"
+                        warningBadge = L("장치 밝기", "Device brightness")
+                        self.displays[i].ddcUserStatus = L("요청값과 다름", "Differs from requested value")
                     }
                     self.displays[i].inlineError = nil
                 } else {
-                    self.displays[i].ddcUserStatus = "확인 실패"
-                    self.displays[i].ddcTechnicalDetail = "포트 \(channel.port) · " + (reading?.description ?? "디스플레이 연결 변경")
-                    warningBadge = "상태 확인 실패"
+                    self.displays[i].ddcUserStatus = L("확인 실패", "Verification failed")
+                    self.displays[i].ddcTechnicalDetail = L("포트 \(channel.port) · ", "Port \(channel.port) · ") + (reading?.description ?? L("디스플레이 연결 변경", "display connection changed"))
+                    warningBadge = L("상태 확인 실패", "Status check failed")
                 }
             }
             if case .sent = result {
@@ -626,7 +626,7 @@ final class DisplayController: ObservableObject {
         displays[idx].awaitingPreferredDDC = false
 
         if oldBackend == .softwareGamma && !softwareDimmer.resetGamma(for: displayID) {
-            setInlineError("원래 색 보정(감마)을 복구하지 못했습니다.", for: displayID)
+            setInlineError(L("원래 색 보정(감마)을 복구하지 못했습니다.", "Could not restore the original color calibration (gamma)."), for: displayID)
             return
         }
         clearAnimation(for: displayID)
@@ -674,9 +674,9 @@ final class DisplayController: ObservableObject {
         case .softwareOverlay:
             guard DisplayTopology.screen(for: item.id) != nil else {
                 if let i = displays.firstIndex(where: { $0.id == item.id }) { displays[i].brightness = item.brightness }
-                setInlineError("소프트웨어 디밍을 표시할 화면 영역이 없습니다.", for: item.id)
+                setInlineError(L("소프트웨어 디밍을 표시할 화면 영역이 없습니다.", "There is no screen area to show software dimming on."), for: item.id)
                 if showOSDError {
-                    osdController.show(displayID: item.id, displayName: hudTitle, warningBadge: "디밍 불가", brightness: item.brightness)
+                    osdController.show(displayID: item.id, displayName: hudTitle, warningBadge: L("디밍 불가", "Cannot dim"), brightness: item.brightness)
                 }
                 return false
             }
@@ -692,9 +692,9 @@ final class DisplayController: ObservableObject {
             cancelSmoothBrightness(for: item.id, finalValue: clamped)
             guard softwareDimmer.setGammaBrightness(clamped, for: item.id) else {
                 if let i = displays.firstIndex(where: { $0.id == item.id }) { displays[i].brightness = item.brightness }
-                setInlineError("감마 디밍을 적용하지 못했습니다. 소프트웨어 디밍으로 바꿔보세요.", for: item.id)
+                setInlineError(L("감마 디밍을 적용하지 못했습니다. 소프트웨어 디밍으로 바꿔보세요.", "Could not apply gamma dimming. Try software dimming instead."), for: item.id)
                 if showOSDError {
-                    osdController.show(displayID: item.id, displayName: hudTitle, warningBadge: "감마 적용 실패", brightness: item.brightness)
+                    osdController.show(displayID: item.id, displayName: hudTitle, warningBadge: L("감마 적용 실패", "Gamma failed"), brightness: item.brightness)
                 }
                 return false
             }
@@ -708,9 +708,9 @@ final class DisplayController: ObservableObject {
             var current: Float = 0
             if let i = displays.firstIndex(where: { $0.id == id }) {
                 if LDDisplayServicesGetBrightness(id, &current) { displays[i].brightness = Double(current) }
-                displays[i].inlineError = "하드웨어 밝기를 변경하지 못했습니다."
+                displays[i].inlineError = L("하드웨어 밝기를 변경하지 못했습니다.", "Could not change the hardware brightness.")
                 if hudDisplay == id {
-                    osdController.show(displayID: id, displayName: hudTitle ?? displays[i].name, warningBadge: "밝기 변경 실패", brightness: displays[i].brightness)
+                    osdController.show(displayID: id, displayName: hudTitle ?? displays[i].name, warningBadge: L("밝기 변경 실패", "Brightness change failed"), brightness: displays[i].brightness)
                 }
             }
             return false
@@ -827,7 +827,7 @@ final class DisplayController: ObservableObject {
                     item.id,
                     delta: delta,
                     showOSD: item.id == hudTarget,
-                    osdTitleOverride: physicals.count > 1 ? "모든 화면" : nil
+                    osdTitleOverride: physicals.count > 1 ? L("모든 화면", "All Displays") : nil
                 )
             }
         }
@@ -879,7 +879,7 @@ final class DisplayController: ObservableObject {
 
         let scope: CGConfigureOption = display.isBuiltIn ? .permanently : .forAppOnly
         guard DisplayModeManager.applyMode(mode.cgMode, to: displayID, scope: scope) else {
-            setInlineError("해상도를 변경하지 못했습니다.", for: displayID)
+            setInlineError(L("해상도를 변경하지 못했습니다.", "Could not change the resolution."), for: displayID)
             return
         }
         if !display.isBuiltIn {
@@ -932,7 +932,7 @@ final class DisplayController: ObservableObject {
             }
         }
         endPreview()
-        showBanner(.info, "화면 연결 또는 모드가 변경되어 해상도 확인을 종료했습니다.")
+        showBanner(.info, L("화면 연결 또는 모드가 변경되어 해상도 확인을 종료했습니다.", "The display connection or mode changed, so the resolution check was dismissed."))
         return nil
     }
 
@@ -943,7 +943,7 @@ final class DisplayController: ObservableObject {
             return
         }
         guard DisplayModeManager.applyMode(preview.previewMode, to: preview.displayID, scope: .permanently) else {
-            showBanner(.error, "선택한 해상도를 저장하지 못했습니다.")
+            showBanner(.error, L("선택한 해상도를 저장하지 못했습니다.", "Could not save the selected resolution."))
             return
         }
         endPreview()
@@ -956,11 +956,11 @@ final class DisplayController: ObservableObject {
             revertTimer = nil
             preview.secondsRemaining = 0
             pendingModeRevert = preview
-            showBanner(.error, "이전 해상도를 복구하지 못했습니다. 되돌리기를 다시 시도하세요.")
+            showBanner(.error, L("이전 해상도를 복구하지 못했습니다. 되돌리기를 다시 시도하세요.", "Could not restore the previous resolution. Try Revert again."))
             return
         }
         endPreview()
-        showBanner(.info, "\(preview.displayName) 해상도를 이전 설정으로 되돌렸습니다.")
+        showBanner(.info, L("\(preview.displayName) 해상도를 이전 설정으로 되돌렸습니다.", "Reverted \(preview.displayName) to its previous resolution."))
         refreshDisplays()
     }
 
@@ -981,21 +981,21 @@ final class DisplayController: ObservableObject {
             let connecting = virtualDisplayManager.isPending(record.id)
             guard connecting || (!topologyChanging && pendingModeRevert == nil) else { return }
             guard virtualDisplayManager.removeVirtualDisplay(id: record.id) else {
-                mirrorStates[display.id] = .failed("기존 미러 구성을 복원하지 못했습니다. 다시 시도해 주세요.")
-                setInlineError("기존 미러 구성을 복원하지 못했습니다.", for: display.id)
+                mirrorStates[display.id] = .failed(L("기존 미러 구성을 복원하지 못했습니다. 다시 시도해 주세요.", "Could not restore the previous mirroring setup. Please try again."))
+                setInlineError(L("기존 미러 구성을 복원하지 못했습니다.", "Could not restore the previous mirroring setup."), for: display.id)
                 return
             }
             mirrorStates[display.id] = .idle
             setInlineError(nil, for: display.id)
-            showBanner(.success, connecting ? "가상 HiDPI 연결을 취소했습니다." : "\(display.name) 가상 HiDPI 미러링을 해제했습니다.")
+            showBanner(.success, connecting ? L("가상 HiDPI 연결을 취소했습니다.", "Cancelled the virtual HiDPI connection.") : L("\(display.name) 가상 HiDPI 미러링을 해제했습니다.", "Turned off virtual HiDPI mirroring for \(display.name)."))
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
                 self?.refreshDisplays()
             }
         } else {
             guard !topologyChanging, pendingModeRevert == nil else { return }
             guard virtualDisplayManager.isSupported else {
-                mirrorStates[display.id] = .failed("이 macOS 버전에서는 가상 HiDPI를 지원하지 않습니다.")
-                setInlineError("이 macOS 버전에서는 가상 HiDPI를 지원하지 않습니다.", for: display.id)
+                mirrorStates[display.id] = .failed(L("이 macOS 버전에서는 가상 HiDPI를 지원하지 않습니다.", "Virtual HiDPI is not supported on this version of macOS."))
+                setInlineError(L("이 macOS 버전에서는 가상 HiDPI를 지원하지 않습니다.", "Virtual HiDPI is not supported on this version of macOS."), for: display.id)
                 return
             }
             mirrorStates[display.id] = .connecting
@@ -1004,9 +1004,9 @@ final class DisplayController: ObservableObject {
                 guard let self, !self.isShuttingDown, DisplayTopology.uuid(display.id) == display.uuidString else { return }
                 if ok {
                     self.mirrorStates[display.id] = .active
-                    self.showBanner(.success, "\(display.name) 가상 HiDPI 미러링이 켜졌습니다.")
+                    self.showBanner(.success, L("\(display.name) 가상 HiDPI 미러링이 켜졌습니다.", "Virtual HiDPI mirroring is on for \(display.name)."))
                 } else {
-                    let msg = reason ?? "가상 HiDPI 미러링을 시작하지 못했습니다."
+                    let msg = reason ?? L("가상 HiDPI 미러링을 시작하지 못했습니다.", "Could not start virtual HiDPI mirroring.")
                     self.mirrorStates[display.id] = .failed(msg)
                     self.setInlineError(msg, for: display.id)
                 }
@@ -1022,18 +1022,18 @@ final class DisplayController: ObservableObject {
             self?.refreshDisplays()
         }
         if created != nil {
-            showBanner(.success, "\(name) (\(preset.rawValue)) 가상 화면을 추가했습니다.")
+            showBanner(.success, L("\(name) (\(preset.label)) 가상 화면을 추가했습니다.", "Added virtual display \(name) (\(preset.label))."))
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
                 self?.refreshDisplays()
             }
         } else {
-            showBanner(.error, "가상 디스플레이를 생성하지 못했습니다.")
+            showBanner(.error, L("가상 디스플레이를 생성하지 못했습니다.", "Could not create the virtual display."))
         }
     }
 
     func removeVirtualDisplay(id: UUID) {
         guard virtualDisplayManager.removeVirtualDisplay(id: id) else {
-            showBanner(.error, "미러 관계 복원에 실패해 가상 화면을 유지합니다.")
+            showBanner(.error, L("미러 관계 복원에 실패해 가상 화면을 유지합니다.", "Could not restore mirroring, so the virtual display was kept."))
             return
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
@@ -1046,7 +1046,7 @@ final class DisplayController: ObservableObject {
         let baseW = quarterTurn ? display.logicalHeight : display.logicalWidth
         let baseH = quarterTurn ? display.logicalWidth : display.logicalHeight
         guard baseW > 0, baseH > 0 else {
-            setInlineError("현재 화면 해상도 정보를 확인할 수 없습니다.", for: display.id)
+            setInlineError(L("현재 화면 해상도 정보를 확인할 수 없습니다.", "Could not read the current display resolution."), for: display.id)
             return
         }
         let aspect = Double(baseW) / Double(max(baseH, 1))
@@ -1062,7 +1062,7 @@ final class DisplayController: ObservableObject {
             displayName: display.name,
             logicalResolutions: candidates
         ) else {
-            setInlineError("해상도 설정 파일 생성에 실패했습니다.", for: display.id)
+            setInlineError(L("해상도 설정 파일 생성에 실패했습니다.", "Could not create the resolution settings file."), for: display.id)
             return
         }
 
@@ -1074,9 +1074,9 @@ final class DisplayController: ObservableObject {
             let fileURL = folder.appendingPathComponent(override.fileName)
             try override.data.write(to: fileURL, options: .atomic)
             NSWorkspace.shared.activateFileViewerSelecting([fileURL])
-            showBanner(.success, "데스크톱에 해상도 설정 파일(\(baseW)×\(baseH) 기준)을 저장했습니다.")
+            showBanner(.success, L("데스크톱에 해상도 설정 파일(\(baseW)×\(baseH) 기준)을 저장했습니다.", "Saved the resolution settings file (based on \(baseW)×\(baseH)) to the Desktop."))
         } catch {
-            setInlineError("파일 저장 실패: \(error.localizedDescription)", for: display.id)
+            setInlineError(L("파일 저장 실패: \(error.localizedDescription)", "Could not save the file: \(error.localizedDescription)"), for: display.id)
         }
     }
 
@@ -1086,7 +1086,7 @@ final class DisplayController: ObservableObject {
         guard !reconfigRegistered else { return }
         let pointer = Unmanaged.passUnretained(self).toOpaque()
         reconfigRegistered = CGDisplayRegisterReconfigurationCallback(displayChanged, pointer) == .success
-        if !reconfigRegistered { showBanner(.warning, "화면 연결 변경 감지를 등록하지 못했습니다.") }
+        if !reconfigRegistered { showBanner(.warning, L("화면 연결 변경 감지를 등록하지 못했습니다.", "Could not register for display connection changes.")) }
     }
 
     fileprivate func configurationChanged(beginning: Bool) {

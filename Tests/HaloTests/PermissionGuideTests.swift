@@ -6,6 +6,9 @@ import Testing
 struct PermissionGuideTests {
     typealias Status = BrightnessKeyMonitor.Status
 
+    // The assertions below read the Korean copy, whatever language the test machine uses.
+    init() { AppLanguage.current = .korean }
+
     // Each test gets a fresh app preferences domain without touching macOS permissions.
     private func withPreferences(_ test: (UserDefaults, String) throws -> Void) rethrows {
         let name = "halo.tests.\(UUID().uuidString)"

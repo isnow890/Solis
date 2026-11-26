@@ -77,11 +77,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     static func initialPermissionAlert(for status: BrightnessKeyMonitor.Status, defaults: UserDefaults) -> NSAlert? {
         guard !status.ready, !status.needsRelaunch, !defaults.bool(forKey: didShowPermissionGuide) else { return nil }
         let alert = NSAlert()
-        alert.messageText = "키보드로 화면 밝기를 조절할까요?"
+        alert.messageText = L("키보드로 화면 밝기를 조절할까요?", "Adjust display brightness from the keyboard?")
         alert.informativeText = BrightnessKeyMonitor.permissionExplanation
-            + "\n\n‘나중에’를 선택해도 메뉴 막대에서 밝기와 해상도를 조절할 수 있습니다."
-        alert.addButton(withTitle: "권한 설정 열기")
-        alert.addButton(withTitle: "나중에").keyEquivalent = "\u{1b}"
+            + L("\n\n‘나중에’를 선택해도 메뉴 막대에서 밝기와 해상도를 조절할 수 있습니다.", "\n\nIf you choose Later, you can still adjust brightness and resolution from the menu bar.")
+        alert.addButton(withTitle: L("권한 설정 열기", "Open Permission Settings"))
+        alert.addButton(withTitle: L("나중에", "Later")).keyEquivalent = "\u{1b}"
         defaults.set(true, forKey: didShowPermissionGuide)
         return alert
     }
@@ -161,9 +161,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 if let port = ports[NSNumber(value: id)], let av = LDCreateAVServiceForPort(port) {
                     var profile: UInt8 = 0
                     let reading = DDCReading(service: av, profile: &profile)
-                    ddcStatus = "\(port) · \(reading.description) · 쓰기 미검사"
+                    ddcStatus = L("\(port) · \(reading.description) · 쓰기 미검사", "\(port) · \(reading.description) · write not tested")
                 } else {
-                    ddcStatus = "고유 AVService 없음"
+                    ddcStatus = L("고유 AVService 없음", "no dedicated AVService")
                 }
             }
 
@@ -184,7 +184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
             button.image = makeHaloMenuBarIcon()
-            button.toolTip = "halo — 화면별 밝기 & HiDPI"
+            button.toolTip = L("halo — 화면별 밝기 & HiDPI", "halo — per-display brightness & HiDPI")
             button.target = self
             button.action = #selector(statusItemClicked(_:))
             // Open immediately on mouseDown like native macOS menu bar items
@@ -282,7 +282,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             return true
         }
         image.isTemplate = true
-        image.accessibilityDescription = "halo 디스플레이 제어"
+        image.accessibilityDescription = L("halo 디스플레이 제어", "halo display controls")
         return image
     }
 
@@ -422,7 +422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
-        let header = NSMenuItem(title: "키보드 밝기 대상", action: nil, keyEquivalent: "")
+        let header = NSMenuItem(title: L("키보드 밝기 대상", "Brightness key target"), action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
 
@@ -437,15 +437,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         menu.addItem(.separator())
 
-        let settingsItem = NSMenuItem(title: "설정…", action: #selector(openSettingsFromMenu), keyEquivalent: ",")
+        let settingsItem = NSMenuItem(title: L("설정…", "Settings…"), action: #selector(openSettingsFromMenu), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
 
-        let updateItem = NSMenuItem(title: "업데이트 확인…", action: #selector(checkUpdatesFromMenu), keyEquivalent: "")
+        let updateItem = NSMenuItem(title: L("업데이트 확인…", "Check for Updates…"), action: #selector(checkUpdatesFromMenu), keyEquivalent: "")
         updateItem.target = self
         menu.addItem(updateItem)
 
-        let loginTitle = (controller?.loginNeedsApproval == true) ? "로그인 시 자동 실행 (승인 대기)" : "로그인 시 자동 실행"
+        let loginTitle = (controller?.loginNeedsApproval == true) ? L("로그인 시 자동 실행 (승인 대기)", "Launch at Login (awaiting approval)") : L("로그인 시 자동 실행", "Launch at Login")
         let loginItem = NSMenuItem(title: loginTitle, action: #selector(toggleLoginFromMenu), keyEquivalent: "")
         if controller?.loginNeedsApproval == true {
             loginItem.state = .mixed
@@ -462,7 +462,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         versionItem.isEnabled = false
         menu.addItem(versionItem)
 
-        let quitItem = NSMenuItem(title: "halo 종료", action: #selector(quitFromMenu), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: L("halo 종료", "Quit halo"), action: #selector(quitFromMenu), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
 

@@ -13,7 +13,7 @@ final class BrightnessKeyMonitor: NSObject {
         var needsRelaunch: Bool { accessibility && postEvent && !ready }
     }
 
-    static let permissionExplanation = "다른 앱을 쓰는 동안에도 밝기 키를 눌러 모니터를 조절하려면 macOS 권한이 필요합니다. halo는 키 입력을 이 Mac에서 밝기 단축키를 구분하는 데만 사용합니다."
+    static var permissionExplanation: String { L("다른 앱을 쓰는 동안에도 밝기 키를 눌러 모니터를 조절하려면 macOS 권한이 필요합니다. halo는 키 입력을 이 Mac에서 밝기 단축키를 구분하는 데만 사용합니다.", "halo needs macOS permission to adjust your displays with the brightness keys while another app is active. It checks key events on this Mac only to recognize brightness shortcuts.") }
 
     static let requiredMask: CGEventMask = (1 << 14) | (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
     static let standardKeysPreference = "halo.captureStandardFunctionKeys"

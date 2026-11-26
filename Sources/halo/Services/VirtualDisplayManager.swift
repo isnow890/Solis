@@ -99,7 +99,7 @@ final class VirtualDisplayManager {
     ) {
         if let record = mirrorRecord(forPhysicalDisplayID: physicalDisplay.id) {
             let active = !isPending(record.id) && CGDisplayMirrorsDisplay(physicalDisplay.id) == record.displayID
-            onComplete(active, active ? nil : "이미 가상 HiDPI 연결이 진행 중입니다.")
+            onComplete(active, active ? nil : L("이미 가상 HiDPI 연결이 진행 중입니다.", "A virtual HiDPI connection is already in progress."))
             return
         }
 
@@ -107,21 +107,21 @@ final class VirtualDisplayManager {
         let physicalID = physicalDisplay.id
         guard let identity = DisplayTopology.uuid(physicalID), identity == physicalDisplay.uuidString,
               let online = DisplayTopology.onlineIDs(), online.contains(physicalID) else {
-            onComplete(false, "디스플레이 연결 상태가 변경되어 취소되었습니다.")
+            onComplete(false, L("디스플레이 연결 상태가 변경되어 취소되었습니다.", "Cancelled because the display connection changed."))
             return
         }
         if online.contains(where: { CGDisplayMirrorsDisplay($0) == physicalID }) {
-            onComplete(false, "다른 화면이 이 디스플레이를 미러링 중이어서 적용할 수 없습니다.")
+            onComplete(false, L("다른 화면이 이 디스플레이를 미러링 중이어서 적용할 수 없습니다.", "Another display is mirroring this one, so it cannot be applied."))
             return
         }
         guard physicalDisplay.logicalWidth > 0, physicalDisplay.logicalHeight > 0 else {
-            onComplete(false, "현재 화면 해상도 정보를 확인할 수 없습니다.")
+            onComplete(false, L("현재 화면 해상도 정보를 확인할 수 없습니다.", "Could not read the current display resolution."))
             return
         }
         let previous = CGDisplayMirrorsDisplay(physicalID)
         let previousUUID = previous == 0 ? nil : DisplayTopology.uuid(previous)
         guard previous == 0 || previousUUID != nil else {
-            onComplete(false, "기존 미러링 구성을 확인할 수 없어 안전하게 중단했습니다.")
+            onComplete(false, L("기존 미러링 구성을 확인할 수 없어 안전하게 중단했습니다.", "Could not read the existing mirroring setup, so it was stopped to be safe."))
             return
         }
         let (baseW, baseH) = Self.mirrorBaseSize(width: physicalDisplay.logicalWidth,
@@ -156,7 +156,7 @@ final class VirtualDisplayManager {
             mirroredPhysicalName: physicalDisplay.name,
             onChange: {}
         ) else {
-            onComplete(false, "가상 디스플레이 생성에 실패했습니다.")
+            onComplete(false, L("가상 디스플레이 생성에 실패했습니다.", "Could not create the virtual display."))
             return
         }
 
@@ -182,7 +182,7 @@ final class VirtualDisplayManager {
                   var request = self.mirrors[id] else { return }
             let virtual = record.handle.displayID
             guard DisplayTopology.uuid(physical) == request.physicalUUID, CGDisplayIsOnline(physical) != 0 else {
-                self.failMirror(id, reason: "연결 대기 중 모니터 상태가 바뀌어 취소되었습니다.")
+                self.failMirror(id, reason: L("연결 대기 중 모니터 상태가 바뀌어 취소되었습니다.", "Cancelled because the monitor changed while connecting."))
                 return
             }
             if CGDisplayIsOnline(virtual) != 0 && !request.committed,
@@ -190,7 +190,7 @@ final class VirtualDisplayManager {
                 guard CGDisplayMirrorsDisplay(physical) == request.previousMaster,
                       request.previousMaster == 0 || DisplayTopology.uuid(request.previousMaster) == request.previousMasterUUID,
                       LDMirrorDisplay(physical, virtual) else {
-                    self.failMirror(id, reason: "macOS 미러링 구성 적용에 실패했습니다.")
+                    self.failMirror(id, reason: L("macOS 미러링 구성 적용에 실패했습니다.", "macOS could not apply the mirroring setup."))
                     return
                 }
                 request.committed = true
@@ -204,7 +204,7 @@ final class VirtualDisplayManager {
             } else if attempts > 1 {
                 self.awaitMirror(id: id, modes: modes, attempts: attempts - 1)
             } else {
-                self.failMirror(id, reason: "가상 HiDPI 모드가 제한 시간 안에 활성화되지 않았습니다.")
+                self.failMirror(id, reason: L("가상 HiDPI 모드가 제한 시간 안에 활성화되지 않았습니다.", "The virtual HiDPI mode did not become active in time."))
             }
         }
         pending[id] = work
@@ -221,7 +221,7 @@ final class VirtualDisplayManager {
         let completion = mirrors[id]?.completion
         mirrors[id]?.completion = nil
         let removed = removeVirtualDisplay(id: id)
-        completion?(false, removed ? reason : "기존 미러 구성을 복원하지 못했습니다. 미러링 해제를 다시 시도하세요.")
+        completion?(false, removed ? reason : L("기존 미러 구성을 복원하지 못했습니다. 미러링 해제를 다시 시도하세요.", "Could not restore the previous mirroring setup. Try turning mirroring off again."))
     }
 
     private func matches(_ mode: CGDisplayMode, specs: [LDVirtualDisplayModeSpec]) -> Bool {
@@ -270,7 +270,7 @@ final class VirtualDisplayManager {
 
     func removeAll() {
         for id in Array(records.keys) where !removeVirtualDisplay(id: id) {
-            NSLog("halo: 가상 화면 미러 관계 복원 실패 %@", id.uuidString)
+            NSLog("halo: failed to restore mirroring for virtual display %@", id.uuidString)
         }
     }
 
@@ -303,7 +303,7 @@ final class VirtualDisplayManager {
                     guard let self, self.records.removeValue(forKey: id) != nil else { return }
                     self.pending.removeValue(forKey: id)?.cancel()
                     let request = self.mirrors.removeValue(forKey: id)
-                    request?.completion?(false, "가상 디스플레이가 시스템에 의해 종료되었습니다.")
+                    request?.completion?(false, L("가상 디스플레이가 시스템에 의해 종료되었습니다.", "The system closed the virtual display."))
                     onChange()
                 }
             }

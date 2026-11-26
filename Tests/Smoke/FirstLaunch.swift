@@ -34,7 +34,7 @@ func attribute(_ node: AXUIElement, _ name: String) -> CFTypeRef? {
 
 func laterButton(in node: AXUIElement) -> AXUIElement? {
     if attribute(node, "AXRole") as? String == "AXButton",
-       attribute(node, "AXTitle") as? String == "나중에" { return node }
+       ["나중에", "Later"].contains(attribute(node, "AXTitle") as? String ?? "") { return node }
     for child in attribute(node, "AXChildren") as? [AXUIElement] ?? [] {
         if let match = laterButton(in: child) { return match }
     }

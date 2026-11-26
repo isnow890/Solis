@@ -26,6 +26,7 @@
 
 **halo** combines the two everyday features people actually use from **MonitorControl** and **BetterDisplay** into a single fast, zero-dependency, pure-Swift menu bar app — no Electron, no background daemons, no sprawling preferences tree.
 
+- **English & Korean UI**: Follows your macOS language — Korean when it is your first preferred language, English otherwise.
 - **Cursor-Aware Brightness Keys**: Press your Mac's brightness keys (`☀`, `F1` / `F2`, `F14` / `F15`, or optional `⌃⌥↑` / `⌃⌥↓`) to adjust **only the display under your mouse cursor** (or switch to All / Main display), with a smooth 120Hz translucent HUD on that exact screen.
 - **3-Tier Brightness Engine**:
   - **Native (`DisplayServices`)** for MacBook Liquid Retina / XDR & Apple displays
@@ -80,7 +81,7 @@ VERSION=0.1.1 ./scripts/package-dmg.sh
 
 ## Permissions & Shortcuts
 
-On first launch, halo asks whether you want to use brightness keys while another app is active. It checks key events on your Mac to recognize brightness shortcuts. Choose **나중에** (Later) to use the menu bar sliders, resolution controls, and virtual HiDPI right away. To enable the shortcuts, choose **권한 설정 열기** (Open Permission Settings) and allow halo in System Settings.
+On first launch, halo asks whether you want to use brightness keys while another app is active. It checks key events on your Mac to recognize brightness shortcuts. Choose **Later** to use the menu bar sliders, resolution controls, and virtual HiDPI right away. To enable the shortcuts, choose **Open Permission Settings** and allow halo in System Settings.
 
 - **macOS 14–26**: `System Settings → Privacy & Security → Accessibility`
 - **macOS 27+**: `System Settings → Privacy & Security → Device Control and Data Access`

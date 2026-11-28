@@ -31,7 +31,15 @@ enum DisplayTopology {
             NSScreen.screens.first { screenID($0).map(desktopID) == desktop }
     }
 
+    /// Asks the window server where the cursor is right now. `NSEvent.mouseLocation` can instead report the
+    /// location carried by the event being handled, and media brightness keys may carry (0, 0), which always
+    /// resolved to the main display.
     static func screenUnderMouse() -> CGDirectDisplayID? {
+        if let point = CGEvent(source: nil)?.location {
+            var id = kCGNullDirectDisplay
+            var count: UInt32 = 0
+            if CGGetDisplaysWithPoint(point, 1, &id, &count) == .success, count > 0 { return id }
+        }
         let point = NSEvent.mouseLocation
         return NSScreen.screens.first { NSMouseInRect(point, $0.frame, false) }.flatMap(screenID)
     }
